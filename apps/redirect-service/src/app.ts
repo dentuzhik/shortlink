@@ -1,6 +1,8 @@
 import { createLinkStore } from "@url-shortener/db/links";
 import Fastify from "fastify";
 import { createDatabasePool } from "./database.js";
+import { registerGraphQL } from "./graphql.js";
+import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
 import { registerRedirectRoute } from "./redirect.js";
 
@@ -37,6 +39,7 @@ export function buildApp(databaseUrl: string) {
 
   const linkStore = createLinkStore(pool);
   registerLinkRoutes(app, linkStore);
+  registerGraphQL(app, createLinkCreator(linkStore));
   registerRedirectRoute(app, linkStore.findTargetUrl);
 
   return app;

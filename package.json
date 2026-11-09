@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @url-shortener/redirect-service dev",
+    "dev:web": "pnpm --filter @url-shortener/web dev",
     "build": "pnpm -r run build",
     "start": "pnpm --filter @url-shortener/redirect-service start",
     "test": "pnpm -r run test",

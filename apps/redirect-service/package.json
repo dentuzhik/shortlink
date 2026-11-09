@@ -7,12 +7,14 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run --exclude 'test/integration/**'",
-    "test:integration": "pnpm --filter @url-shortener/db build && vitest run test/integration",
+    "test:integration": "pnpm --filter @url-shortener/redirect-service... build && vitest run test/integration",
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
     "@url-shortener/db": "workspace:*",
     "fastify": "5.12.8",
+    "graphql": "17.1.0",
+    "graphql-yoga": "6.0.1",
     "pg": "8.23.1"
   },
   "devDependencies": {

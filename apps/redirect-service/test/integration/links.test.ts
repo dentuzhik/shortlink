@@ -1,13 +1,18 @@
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { buildApp } from "../../src/app.js";
+import type { buildApp as buildProductionApp } from "../../src/app.js";
 
 const run = promisify(execFile);
+// Use Node's module loader so GraphQL Yoga and the app share one GraphQL runtime.
+const { buildApp } = createRequire(import.meta.url)("../../dist/app.js") as {
+  buildApp: typeof buildProductionApp;
+};
 
 describe("links with Postgres", () => {
   let postgres: StartedPostgreSqlContainer | undefined;
@@ -64,5 +69,49 @@ describe("links with Postgres", () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ error: "Link not found" });
+  });
+
+  test("creates a redirectable link through the GraphQL mutation", async () => {
+    const targetUrl = "https://example.com/graphql";
+    const created = await app.inject({
+      method: "POST",
+      url: "/graphql",
+      payload: {
+        query: `mutation CreateLink($input: CreateLinkInput!) {
+          createLink(input: $input) { code }
+        }`,
+        variables: { input: { targetUrl } },
+      },
+    });
+
+    expect(created.statusCode).toBe(200);
+    const result = created.json<{ data: { createLink: { code: string } } }>();
+    expect(result).toEqual({
+      data: {
+        createLink: { code: expect.stringMatching(/^[A-Za-z0-9_-]{8}$/) },
+      },
+    });
+
+    const redirect = await app.inject({
+      method: "GET",
+      url: `/${result.data.createLink.code}`,
+    });
+    expect(redirect.statusCode).toBe(302);
+    expect(redirect.headers.location).toBe(targetUrl);
+  });
+
+  test("returns a GraphQL input error for a non-HTTP destination", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/graphql",
+      payload: {
+        query: `mutation { createLink(input: { targetUrl: "ftp://example.com" }) { code } }`,
+      },
+    });
+
+    expect(response.json()).toMatchObject({
+      data: null,
+      errors: [{ extensions: { code: "BAD_USER_INPUT" } }],
+    });
   });
 });

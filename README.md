@@ -5,8 +5,9 @@ Commit the reviewed baseline before each increment, then review the next change 
 
 ## Current checkpoint
 
-Phase 1: `POST /links` creates a short code and saves it with its destination
-URL in Postgres. `GET /:code` looks up the destination and redirects to it.
+The Next.js page creates links through a GraphQL mutation on Fastify. The REST
+creation route and GraphQL mutation share URL validation and code allocation.
+`GET /:code` looks up the destination and redirects to it.
 
 ## Run locally
 
@@ -41,6 +42,24 @@ while Fastify is running. `/healthz` stays `200`; `/readyz` returns `503`. Run
 without restarting Fastify.
 
 ## Create a link
+
+Keep the Fastify server running and start Next.js in a second terminal:
+
+```sh
+pnpm dev:web
+```
+
+Open [Shortlink](http://127.0.0.1:3001), paste a destination URL, and click
+**Create link**. The page lets you open or copy the result.
+
+The browser sends a GraphQL mutation to `/graphql` on the Next.js origin.
+`apps/web/next.config.ts` forwards it to Fastify on port 3000. The resolver
+calls the same link creator as the REST handler and uses the existing pool.
+The redirect itself still goes to Fastify.
+
+The web app defaults to `http://127.0.0.1:3000` for both the Fastify upstream
+and generated short links. Override them separately with `REDIRECT_SERVICE_ORIGIN`
+and `NEXT_PUBLIC_SHORT_LINK_ORIGIN` before starting or building the web app.
 
 With `pnpm dev` running after `pnpm db:migrate`:
 
@@ -134,7 +153,7 @@ need neither a listening server nor Postgres. They verify the HTTP behavior and
 retry policy.
 
 `pnpm test:integration` uses Testcontainers to start a fresh Postgres container,
-run `db:migrate` against it, and verify that a created code redirects. It closes
+run `db:migrate` against it, and verify that codes created via REST and GraphQL redirect. It closes
 Fastify and stops the container when finished. It uses a separate database and
 does not need `pnpm db:up` or a running HTTP server.
 
@@ -174,5 +193,7 @@ giving us a baseline before adding caching.
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),
 [Drizzle migrations](https://orm.drizzle.team/docs/drizzle-kit-migrate),
+[GraphQL Yoga with Fastify](https://the-guild.dev/graphql/yoga-server/docs/integrations/integration-with-fastify),
+[Next.js rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites),
 [Testcontainers on Colima](https://node.testcontainers.org/supported-container-runtimes/#colima),
 [Postgres image configuration](https://hub.docker.com/_/postgres).
