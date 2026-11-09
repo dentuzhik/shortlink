@@ -1,0 +1,17 @@
+{
+  "name": "@url-shortener/db",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "drizzle-kit migrate",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.11",
+    "pg": "8.23.1"
+  }
+}

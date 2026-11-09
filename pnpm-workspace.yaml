@@ -5,3 +5,6 @@ packages:
 # tsx uses esbuild, whose install script prepares its native executable.
 allowBuilds:
   esbuild@0.28.2: true
+  # Drizzle Kit uses esbuild's prebuilt platform packages.
+  esbuild@0.18.20: false
+  esbuild@0.25.12: false

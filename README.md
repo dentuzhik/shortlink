@@ -5,8 +5,8 @@ Commit the reviewed baseline before each increment, then review the next change 
 
 ## Current checkpoint
 
-Phase 1, increment 2: Fastify owns a Postgres connection pool. `/healthz` checks
-that the HTTP service responds; `/readyz` checks that it can query Postgres.
+Phase 1, increment 3: the first migration creates the `links` table. Fastify
+still exposes `/healthz` and `/readyz`; link endpoints come next.
 
 ## Run locally
 
@@ -17,6 +17,7 @@ colima start
 test -f .env || cp .env.example .env
 pnpm install --frozen-lockfile
 pnpm db:up
+pnpm db:migrate
 pnpm dev
 ```
 
@@ -31,8 +32,8 @@ docker compose exec postgres psql -U shortener -d shortener -c 'SELECT 1 AS conn
 
 If you already have a `.env` from increment 1, add `DATABASE_URL` from
 `.env.example` and adjust it if you changed the local database credentials.
-Fastify reads the root `.env` in development and accepts `DATABASE_URL` from the
-environment when deployed.
+Fastify and Drizzle Kit read the root `.env` locally. An exported `DATABASE_URL`
+takes precedence, so check which database it points to before applying migrations.
 
 To see the difference between the two probes, run `docker compose stop postgres`
 while Fastify is running. `/healthz` stays `200`; `/readyz` returns `503`. Run
@@ -59,10 +60,27 @@ without restarting Fastify.
 - `.env` supplies the initialization credentials to Compose and the connection
   URL to Fastify. Git ignores it. Changing the initialization credentials later
   does not change users in an existing volume.
-- `pnpm-workspace.yaml` discovers apps and future shared packages. The pool lives
-  in the redirect service for now; we can extract shared database code when it
-  has another consumer.
+- `packages/db` owns the schema and migrations. The pool stays in the redirect
+  service, where its lifecycle belongs.
 - Dependencies use exact versions; `pnpm-lock.yaml` records transitive dependencies.
+
+## Review a database migration
+
+`packages/db/src/schema.ts` describes the intended table. The generated SQL in
+`packages/db/migrations` is what Postgres runs. Read it before applying it: Postgres
+generates the internal ID and creation time, requires a destination URL and code,
+and rejects duplicate codes with `links_code_unique`.
+
+```sh
+pnpm db:migrate
+docker compose exec postgres psql -U shortener -d shortener -c '\d links'
+```
+
+Drizzle records applied migrations in `drizzle.__drizzle_migrations`, so running
+`pnpm db:migrate` again skips steps already applied. Fastify does not run migrations
+on startup. When changing the schema, run `pnpm db:generate --name=describe_change`,
+review the new SQL, and keep it with the generated metadata in Git. Add a new
+migration for subsequent changes rather than editing one already applied.
 
 ## Check and build
 
@@ -92,8 +110,9 @@ database data and should only be used when intentionally resetting it.
 ## Next review checkpoint
 
 `SELECT 1` confirms connectivity. It does not verify that the links table exists.
-The next increment introduces the schema and its first migration.
+The next increment adds `POST /links` to validate input and insert a row.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),
+[Drizzle migrations](https://orm.drizzle.team/docs/drizzle-kit-migrate),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

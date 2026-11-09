@@ -14,6 +14,8 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "db:up": "docker compose up -d --wait postgres",
+    "db:generate": "pnpm --filter @url-shortener/db generate",
+    "db:migrate": "pnpm --filter @url-shortener/db migrate",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres"
   },
