@@ -1,12 +1,12 @@
 # URL shortener
 
 A backend learning project, built in small, reviewable increments.
+Commit the reviewed baseline before each increment, then review the next change as a diff.
 
 ## Current checkpoint
 
-Phase 1, increment 1: Fastify and Postgres run independently. The service exposes
-`GET /healthz` and writes structured JSON logs using Fastify's built-in Pino logger.
-There is no database connection in the service yet.
+Phase 1, increment 2: Fastify owns a Postgres connection pool. `/healthz` checks
+that the HTTP service responds; `/readyz` checks that it can query Postgres.
 
 ## Run locally
 
@@ -14,7 +14,7 @@ Prerequisites: Node.js 26.13.0, pnpm 12.18.0, Colima, Docker CLI, and Docker Com
 
 ```sh
 colima start
-cp .env.example .env
+test -f .env || cp .env.example .env
 pnpm install --frozen-lockfile
 pnpm db:up
 pnpm dev
@@ -23,20 +23,31 @@ pnpm dev
 The server listens on `127.0.0.1:3000`. In another terminal:
 
 ```sh
-curl http://127.0.0.1:3000/healthz
-# {"status":"ok"}
+curl -i http://127.0.0.1:3000/healthz
+curl -i http://127.0.0.1:3000/readyz
 
 docker compose exec postgres psql -U shortener -d shortener -c 'SELECT 1 AS connected;'
 ```
 
-The SQL command checks Postgres directly. `/healthz` only confirms that the HTTP
-service responds; it does not check Postgres. Database readiness will be a separate
-endpoint once the service owns a database connection pool.
+If you already have a `.env` from increment 1, add `DATABASE_URL` from
+`.env.example` and adjust it if you changed the local database credentials.
+Fastify reads the root `.env` in development and accepts `DATABASE_URL` from the
+environment when deployed.
+
+To see the difference between the two probes, run `docker compose stop postgres`
+while Fastify is running. `/healthz` stays `200`; `/readyz` returns `503`. Run
+`pnpm db:up` to bring Postgres back and check that `/readyz` returns `200` again
+without restarting Fastify.
 
 ## Review the scaffold
 
 - `apps/redirect-service/src/app.ts` creates the Fastify instance and defines routes.
-  Calling `buildApp()` does not open a network port.
+  It creates one pool shared across requests and closes it in `onClose`, after
+  active HTTP requests finish. `/readyz` runs `SELECT 1` through this pool.
+- `apps/redirect-service/src/database.ts` validates the database URL and configures
+  the pool. Connections open on demand, up to five per app instance. The driver
+  limits the wait for a connection and for a query result to 500 ms each. Start with
+  these local settings and revisit them when measuring redirect load.
 - `apps/redirect-service/src/server.ts` opens the HTTP port and closes the app on
   SIGINT (Ctrl+C) or SIGTERM. Its `.js` import points to the JavaScript file that
   TypeScript emits; `tsx` also resolves it during development.
@@ -45,10 +56,12 @@ endpoint once the service owns a database connection pool.
   network would use `postgres:5432` instead.
 - The `postgres_data` Docker volume persists database files when the container is
   replaced. Postgres 18 stores its data beneath `/var/lib/postgresql`.
-- `.env` supplies local database initialization credentials to Compose and is
-  ignored by Git. Changing them later does not change users in an existing volume.
-- `pnpm-workspace.yaml` discovers apps and future shared packages. We will add
-  `packages/db` when we introduce the connection pool and schema.
+- `.env` supplies the initialization credentials to Compose and the connection
+  URL to Fastify. Git ignores it. Changing the initialization credentials later
+  does not change users in an existing volume.
+- `pnpm-workspace.yaml` discovers apps and future shared packages. The pool lives
+  in the redirect service for now; we can extract shared database code when it
+  has another consumer.
 - Dependencies use exact versions; `pnpm-lock.yaml` records transitive dependencies.
 
 ## Check and build
@@ -78,10 +91,9 @@ database data and should only be used when intentionally resetting it.
 
 ## Next review checkpoint
 
-Before wiring Fastify to Postgres, discuss connection pooling: one bounded pool per
-app instance, shared across requests, with startup verification and cleanup when
-Fastify closes. After that review, add the database package and `/readyz`, then
-introduce the schema, migrations, and link endpoints in later increments.
+`SELECT 1` confirms connectivity. It does not verify that the links table exists.
+The next increment introduces the schema and its first migration.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
+[node-postgres pooling](https://node-postgres.com/features/pooling),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

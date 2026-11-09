@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
+import { readDatabaseUrl } from "./database.js";
 
-const app = buildApp();
+const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL));
 
 async function shutdown(signal: string) {
   app.log.info({ signal }, "Shutting down");
