@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import { links } from "./schema.js";
@@ -19,6 +20,15 @@ export function createLinkStore(pool: Pool) {
         });
 
       return link;
+    },
+
+    async findTargetUrl(code: string) {
+      const [link] = await db
+        .select({ targetUrl: links.targetUrl })
+        .from(links)
+        .where(eq(links.code, code));
+
+      return link?.targetUrl;
     },
   };
 }

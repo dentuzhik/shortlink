@@ -2,6 +2,7 @@ import { createLinkStore } from "@url-shortener/db/links";
 import Fastify from "fastify";
 import { createDatabasePool } from "./database.js";
 import { registerLinkRoutes } from "./links.js";
+import { registerRedirectRoute } from "./redirect.js";
 
 export function buildApp(databaseUrl: string) {
   const app = Fastify({
@@ -34,7 +35,9 @@ export function buildApp(databaseUrl: string) {
     }
   });
 
-  registerLinkRoutes(app, createLinkStore(pool));
+  const linkStore = createLinkStore(pool);
+  registerLinkRoutes(app, linkStore);
+  registerRedirectRoute(app, linkStore.findTargetUrl);
 
   return app;
 }

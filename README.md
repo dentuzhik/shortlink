@@ -5,8 +5,8 @@ Commit the reviewed baseline before each increment, then review the next change 
 
 ## Current checkpoint
 
-Phase 1, increment 4: `POST /links` creates a short code and saves it with its
-destination URL in Postgres. Looking up a code and redirecting comes next.
+Phase 1: `POST /links` creates a short code and saves it with its destination
+URL in Postgres. `GET /:code` looks up the destination and redirects to it.
 
 ## Run locally
 
@@ -61,6 +61,18 @@ so Fastify tries another candidate. It makes at most three insert attempts and
 returns `503` if all three collide. An unrelated database failure ends the request
 immediately.
 
+## Visit a short link
+
+Replace `YOUR_CODE` with the code returned by `POST /links`:
+
+```sh
+curl -i http://127.0.0.1:3000/YOUR_CODE
+```
+
+The response is `302 Found` with the destination in `Location`. Both the
+redirect and a missing code's `404` carry `Cache-Control: no-store`. Each
+request reaching the service reads the current destination from Postgres.
+
 ## Review the scaffold
 
 - `apps/redirect-service/src/app.ts` creates the Fastify instance and defines routes.
@@ -81,7 +93,7 @@ immediately.
 - `.env` supplies the initialization credentials to Compose and the connection
   URL to Fastify. Git ignores it. Changing the initialization credentials later
   does not change users in an existing volume.
-- `packages/db` owns the schema, migrations, and the typed insert query. Its
+- `packages/db` owns the schema, migrations, and the typed link queries. Its
   `createLinkStore` wraps the pool owned by Fastify.
 - Dependencies use exact versions; `pnpm-lock.yaml` records transitive dependencies.
 
@@ -117,7 +129,7 @@ pnpm build
 pnpm start
 ```
 
-The link creation tests call Fastify's `inject()` with a fake link store, so they
+The route tests call Fastify's `inject()` with fake link queries, so they
 need neither a listening server nor Postgres. They verify the HTTP behavior and
 retry policy. A database integration test would verify the actual SQL and constraints.
 
@@ -141,8 +153,8 @@ database data and should only be used when intentionally resetting it.
 
 ## Next review checkpoint
 
-The next increment adds `GET /:code`: look up the destination by its unique code,
-return `404` if it is missing, or send a redirect to the stored URL.
+The next increment adds integration tests against an isolated Postgres instance
+so the full create and redirect path can be verified automatically.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),

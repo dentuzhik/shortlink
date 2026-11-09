@@ -29,7 +29,7 @@ function generateLinkCode(): string {
 
 export function registerLinkRoutes(
   app: FastifyInstance,
-  store: ReturnType<typeof createLinkStore>,
+  store: Pick<ReturnType<typeof createLinkStore>, "insert">,
   generateCode = generateLinkCode,
 ) {
   app.post<{ Body: { targetUrl: string } }>(
