@@ -110,11 +110,16 @@ migration for subsequent changes rather than editing one already applied.
 ## Check and build
 
 ```sh
+pnpm test
 pnpm lint
 pnpm typecheck
 pnpm build
 pnpm start
 ```
+
+The link creation tests call Fastify's `inject()` with a fake link store, so they
+need neither a listening server nor Postgres. They verify the HTTP behavior and
+retry policy. A database integration test would verify the actual SQL and constraints.
 
 `pnpm dev` builds the database workspace package, then uses `tsx` to run the
 service and restart on edits. Restart `pnpm dev` after changing the database
