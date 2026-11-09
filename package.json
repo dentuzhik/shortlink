@@ -9,6 +9,10 @@
   "scripts": {
     "dev": "pnpm --filter @url-shortener/redirect-service dev",
     "dev:web": "pnpm --filter @url-shortener/web dev",
+    "stack:up": "sh scripts/stack-up.sh",
+    "stack:down": "docker compose down",
+    "k8s:up": "sh scripts/k8s-up.sh",
+    "k8s:forward": "sh scripts/k8s-forward.sh",
     "build": "pnpm -r run build",
     "start": "pnpm --filter @url-shortener/redirect-service start",
     "test": "pnpm -r run test",

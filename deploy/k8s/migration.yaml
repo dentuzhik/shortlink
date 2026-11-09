@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 90
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: shortlink-redirect:local
+          imagePullPolicy: Never
+          args: ["pnpm", "db:migrate"]
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+          env:
+            - name: POSTGRES_HOST
+              value: postgres
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi

@@ -18,7 +18,10 @@ process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
 try {
-  await app.listen({ host: "127.0.0.1", port: 3000 });
+  await app.listen({
+    host: process.env.LISTEN_HOST ?? "127.0.0.1",
+    port: 3000,
+  });
 } catch (error) {
   app.log.error(error);
   await app.close();

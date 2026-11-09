@@ -3,6 +3,7 @@ dist/
 .next/
 next-env.d.ts
 *.tsbuildinfo
+.kind/
 .env
 .env.*
 !.env.example

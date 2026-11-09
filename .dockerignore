@@ -1,0 +1,11 @@
+.git
+.kind
+**/node_modules
+**/dist
+**/.next
+**/next-env.d.ts
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+**/*.log
+**/.DS_Store

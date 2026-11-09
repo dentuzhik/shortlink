@@ -9,7 +9,53 @@ The Next.js page creates links through a GraphQL mutation on Fastify. The REST
 creation route and GraphQL mutation share URL validation and code allocation.
 `GET /:code` looks up the destination and redirects to it.
 
-## Run locally
+## Run the whole stack in Docker
+
+With Colima running and Docker Compose and Buildx installed:
+
+```sh
+pnpm stack:up
+```
+
+Open [Shortlink](http://127.0.0.1:3101). The containerized Fastify server is on
+`127.0.0.1:3100`, so the existing host dev servers can keep using ports 3000
+and 3001. Compose starts Postgres, waits for the migration container to finish,
+then starts Fastify and Next.js. A first run copies `.env.example` to `.env`
+if needed. `pnpm stack:down` stops the stack and keeps the Postgres volume.
+
+Inside the Docker network, Fastify reaches `postgres:5432` and Next.js
+forwards `/graphql` to `redirect-service:3000`. The browser sees host ports;
+containers talk to each other by service name. The same service names are used
+in Kubernetes, so the built images work in both places.
+
+## Run in local Kubernetes
+
+With Colima running and `kind` and `kubectl` installed, run:
+
+```sh
+pnpm k8s:up
+pnpm k8s:forward
+```
+
+`k8s:up` builds the same images, loads them into the `shortlink` kind cluster,
+starts a separate Postgres with its own volume, waits for the migration Job,
+and deploys Fastify and Next.js. The kubeconfig stays in the ignored `.kind/`
+directory, so the commands do not switch your default Kubernetes context.
+
+Keep `k8s:forward` running and open [Shortlink](http://127.0.0.1:3101).
+Stop the Compose stack first if it is using ports 3100 and 3101. Ctrl+C stops
+the port forwards; the cluster keeps running.
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get pods,services,jobs,pvc
+```
+
+The [local manifests](deploy/k8s/) use a migration Job and separate Fastify
+readiness (`/readyz`) and liveness (`/healthz`) probes. A Gateway can replace
+port forwarding in a later deployment. The kind database is independent of
+the Compose database; deleting the kind cluster also deletes its local volume.
+
+## Run the services on the host for development
 
 Prerequisites: Node.js 26.13.0, pnpm 12.18.0, Colima, Docker CLI, and Docker Compose.
 
