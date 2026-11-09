@@ -131,7 +131,22 @@ pnpm start
 
 The route tests call Fastify's `inject()` with fake link queries, so they
 need neither a listening server nor Postgres. They verify the HTTP behavior and
-retry policy. A database integration test would verify the actual SQL and constraints.
+retry policy.
+
+`pnpm test:integration` uses Testcontainers to start a fresh Postgres container,
+run `db:migrate` against it, and verify that a created code redirects. It closes
+Fastify and stops the container when finished. It uses a separate database and
+does not need `pnpm db:up` or a running HTTP server.
+
+On Colima, start the VM and run the same command:
+
+```sh
+colima start
+pnpm test:integration
+```
+
+The command reads the socket from the active Colima Docker context when
+`DOCKER_HOST` is unset. An explicitly configured Docker host takes precedence.
 
 `pnpm dev` builds the database workspace package, then uses `tsx` to run the
 service and restart on edits. Restart `pnpm dev` after changing the database
@@ -153,10 +168,11 @@ database data and should only be used when intentionally resetting it.
 
 ## Next review checkpoint
 
-The next increment adds integration tests against an isolated Postgres instance
-so the full create and redirect path can be verified automatically.
+The next increment measures redirect throughput and latency with Postgres alone,
+giving us a baseline before adding caching.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),
 [Drizzle migrations](https://orm.drizzle.team/docs/drizzle-kit-migrate),
+[Testcontainers on Colima](https://node.testcontainers.org/supported-container-runtimes/#colima),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

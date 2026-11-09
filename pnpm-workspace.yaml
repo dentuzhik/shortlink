@@ -8,3 +8,7 @@ allowBuilds:
   # Drizzle Kit uses esbuild's prebuilt platform packages.
   esbuild@0.18.20: false
   esbuild@0.25.12: false
+  # Local Testcontainers needs neither native SSH optimizations nor install notices.
+  cpu-features@0.0.10: false
+  protobufjs@7.6.6: false
+  ssh2@1.17.0: false
