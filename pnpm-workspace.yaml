@@ -1,0 +1,7 @@
+packages:
+  - apps/*
+  - packages/*
+
+# tsx uses esbuild, whose install script prepares its native executable.
+allowBuilds:
+  esbuild@0.28.2: true
