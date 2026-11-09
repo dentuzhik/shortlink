@@ -76,6 +76,10 @@ pnpm db:migrate
 docker compose exec postgres psql -U shortener -d shortener -c '\d links'
 ```
 
+For the browser UI, run `pnpm db:studio` while Postgres is running and open
+[Drizzle Studio](https://local.drizzle.studio). Select `public` → `links`, then
+use **Structure** to inspect the table or **Data** to view its rows.
+
 Drizzle records applied migrations in `drizzle.__drizzle_migrations`, so running
 `pnpm db:migrate` again skips steps already applied. Fastify does not run migrations
 on startup. When changing the schema, run `pnpm db:generate --name=describe_change`,

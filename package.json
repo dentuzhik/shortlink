@@ -16,6 +16,7 @@
     "db:up": "docker compose up -d --wait postgres",
     "db:generate": "pnpm --filter @url-shortener/db generate",
     "db:migrate": "pnpm --filter @url-shortener/db migrate",
+    "db:studio": "pnpm --filter @url-shortener/db exec drizzle-kit studio --host=127.0.0.1",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres"
   },
