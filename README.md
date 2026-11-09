@@ -5,8 +5,8 @@ Commit the reviewed baseline before each increment, then review the next change 
 
 ## Current checkpoint
 
-Phase 1, increment 3: the first migration creates the `links` table. Fastify
-still exposes `/healthz` and `/readyz`; link endpoints come next.
+Phase 1, increment 4: `POST /links` creates a short code and saves it with its
+destination URL in Postgres. Looking up a code and redirecting comes next.
 
 ## Run locally
 
@@ -40,6 +40,27 @@ while Fastify is running. `/healthz` stays `200`; `/readyz` returns `503`. Run
 `pnpm db:up` to bring Postgres back and check that `/readyz` returns `200` again
 without restarting Fastify.
 
+## Create a link
+
+With `pnpm dev` running after `pnpm db:migrate`:
+
+```sh
+curl -i http://127.0.0.1:3000/links \
+  -H 'Content-Type: application/json' \
+  -d '{"targetUrl":"https://example.com/guide"}'
+```
+
+A valid request returns `201 Created` with `code`, `targetUrl`, and `createdAt`.
+See the saved row in `pnpm db:studio`. The request must contain an absolute HTTP
+or HTTPS URL without credentials, up to 2,048 characters.
+
+Fastify validates the request before touching the database. Drizzle uses the
+existing pool to try an `INSERT … ON CONFLICT (code) DO NOTHING RETURNING …`.
+If an eight-character random code is already taken, the insert returns no row,
+so Fastify tries another candidate. It makes at most three insert attempts and
+returns `503` if all three collide. An unrelated database failure ends the request
+immediately.
+
 ## Review the scaffold
 
 - `apps/redirect-service/src/app.ts` creates the Fastify instance and defines routes.
@@ -60,8 +81,8 @@ without restarting Fastify.
 - `.env` supplies the initialization credentials to Compose and the connection
   URL to Fastify. Git ignores it. Changing the initialization credentials later
   does not change users in an existing volume.
-- `packages/db` owns the schema and migrations. The pool stays in the redirect
-  service, where its lifecycle belongs.
+- `packages/db` owns the schema, migrations, and the typed insert query. Its
+  `createLinkStore` wraps the pool owned by Fastify.
 - Dependencies use exact versions; `pnpm-lock.yaml` records transitive dependencies.
 
 ## Review a database migration
@@ -95,8 +116,10 @@ pnpm build
 pnpm start
 ```
 
-`pnpm dev` uses `tsx` to run TypeScript and restart on edits. `pnpm build` uses
-`tsc` to emit JavaScript into `dist/`; `pnpm start` runs that output with Node.
+`pnpm dev` builds the database workspace package, then uses `tsx` to run the
+service and restart on edits. Restart `pnpm dev` after changing the database
+package. `pnpm build` compiles both packages; `pnpm start` runs the service's
+compiled JavaScript with Node.
 Stop the development server before starting the compiled server on the same port.
 
 ## Stop locally
@@ -113,8 +136,8 @@ database data and should only be used when intentionally resetting it.
 
 ## Next review checkpoint
 
-`SELECT 1` confirms connectivity. It does not verify that the links table exists.
-The next increment adds `POST /links` to validate input and insert a row.
+The next increment adds `GET /:code`: look up the destination by its unique code,
+return `404` if it is missing, or send a redirect to the stored URL.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),

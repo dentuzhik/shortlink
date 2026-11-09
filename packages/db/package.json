@@ -2,16 +2,24 @@
   "name": "@url-shortener/db",
   "private": true,
   "type": "module",
+  "exports": {
+    "./links": {
+      "types": "./src/links.ts",
+      "default": "./dist/links.js"
+    }
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "pg": "8.23.1"
   },
   "devDependencies": {
-    "drizzle-kit": "0.31.11",
-    "pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11"
   }
 }

@@ -1,8 +1,13 @@
+import { createLinkStore } from "@url-shortener/db/links";
 import Fastify from "fastify";
 import { createDatabasePool } from "./database.js";
+import { registerLinkRoutes } from "./links.js";
 
 export function buildApp(databaseUrl: string) {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
+  });
   const pool = createDatabasePool(databaseUrl);
 
   pool.on("error", (error) => {
@@ -28,6 +33,8 @@ export function buildApp(databaseUrl: string) {
       return reply.code(503).send({ status: "not ready" });
     }
   });
+
+  registerLinkRoutes(app, createLinkStore(pool));
 
   return app;
 }
