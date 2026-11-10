@@ -231,10 +231,31 @@ colima stop
 `db:down` retains the data volume. `docker compose down --volumes` deletes local
 database data and should only be used when intentionally resetting it.
 
-## Next review checkpoint
+## Benchmark redirects
 
-The next increment measures redirect throughput and latency with Postgres alone,
-giving us a baseline before adding caching.
+With Colima running:
+
+```sh
+pnpm bench:redirect
+```
+
+This starts a separate Compose project, migrates an empty Postgres database,
+and seeds 1,000 links. k6 sends requests directly to `redirect-service:3000`
+on the private Compose network. The test starts neither Next.js nor a port
+forward and removes its containers and database volume when it finishes.
+
+After a short warm-up, the test schedules 50, 150, then 300 requests per second
+for 10 seconds each. It starts requests at the requested rate even if the
+server slows down. It checks `302` and the expected `Location` header without
+following the redirect.
+
+Read `http_reqs` for achieved request rate, `http_req_duration` for latency,
+and `checks_failed` for incorrect redirects. A dropped iteration means k6
+could not start a scheduled request with the available virtual users. It is
+separate from a request that reached Fastify and failed.
+
+For a short check, run `BENCH_RATES=5 BENCH_SECONDS=1 pnpm bench:redirect`.
+See [benchmark results](benchmarks/README.md) for the recorded baseline.
 
 References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guides/Testing/),
 [node-postgres pooling](https://node-postgres.com/features/pooling),

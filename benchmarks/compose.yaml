@@ -1,0 +1,16 @@
+services:
+  postgres:
+    ports: !reset []
+  redirect-service:
+    ports: !reset []
+  k6:
+    image: grafana/k6:2.3.0
+    environment:
+      K6_NO_USAGE_REPORT: "true"
+    volumes:
+      - ./benchmarks:/benchmarks:ro
+    command: ["run", "--quiet", "--no-color", "/benchmarks/redirect.js"]
+
+networks:
+  default:
+    internal: true

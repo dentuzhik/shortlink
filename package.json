@@ -13,6 +13,7 @@
     "stack:down": "docker compose down",
     "k8s:up": "sh scripts/k8s-up.sh",
     "k8s:forward": "sh scripts/k8s-forward.sh",
+    "bench:redirect": "sh scripts/bench-redirect.sh",
     "build": "pnpm -r run build",
     "start": "pnpm --filter @url-shortener/redirect-service start",
     "test": "pnpm -r run test",
