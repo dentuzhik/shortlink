@@ -49,9 +49,11 @@ export const options = {
   discardResponseBodies: true,
   summaryTrendStats: ["avg", "p(95)", "p(99)", "max"],
   thresholds: {
+    correct_redirect_within_100ms: ["rate>=0.99"],
     dropped_iterations: ["count==0"],
     "iterations{scenario:redirect}": [`count>=${redirectRate * duration - 1}`],
     "iterations{scenario:create_link}": [`count>=${createRate * duration - 1}`],
+    link_creation_success: ["rate==1"],
     cache_source_matches: ["rate==1"],
     [redisTimingOut ? "postgres_lookups" : "redis_hits"]: ["count>0"],
   },
