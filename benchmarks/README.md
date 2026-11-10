@@ -124,3 +124,31 @@ The 5k control shows that the result is sensitive to the setup. The Mac run
 moved k6 outside the VM and sent requests through Colima's published port. The
 control kept the whole request path inside the VM. The two runs vary both
 factors, so the throughput plateau describes the host setup as tested.
+
+## Five vs. ten connections at 7,500 requests/s
+
+Use the Mac runner with k6 2.3.0 and run the comparison in both orders:
+
+```sh
+for pool_limit in 5 10 10 5; do
+  BENCH_HOST=1 BENCH_VUS=240 BENCH_POOL_MAX="$pool_limit" \
+    BENCH_RATES=7500 BENCH_SECONDS=30 pnpm bench:redirect
+done
+```
+
+Each run used a fresh stack seeded with the same 1,000 links. The runner,
+worker count, target rate, warm-up, and 30-second duration were the same.
+
+| Run | Pool max | Achieved req/s | HTTP p99 (ms) | Checkout p99 (ms) | Mean lookup (ms) | Lookup p99 (ms) | Dropped starts |
+| --: | -------: | -------------: | ------------: | ----------------: | ---------------: | --------------: | -------------: |
+|   1 |        5 |       6,186.47 |         67.18 |             63.40 |             0.78 |            2.76 |         39,227 |
+|   2 |       10 |       6,180.06 |         69.52 |             62.26 |             1.57 |            4.87 |         39,433 |
+|   3 |       10 |       6,166.60 |         72.89 |             65.05 |             1.59 |            4.76 |         39,776 |
+|   4 |        5 |       6,332.78 |         68.23 |             64.30 |             0.76 |            2.69 |         34,832 |
+
+Every issued request passed both checks. All four runs hit the 240-worker
+limit and failed the zero-drop threshold. Doubling the pool gave no throughput
+gain, and checkout p99 stayed in the same range. With ten connections, mean
+lookup time roughly doubled. That timing includes the driver, network round
+trip, and Node scheduling. The comparison measures the effect of pool size on
+this workload and leaves the source of the lookup slowdown open.
