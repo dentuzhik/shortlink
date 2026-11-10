@@ -97,6 +97,7 @@ stage() {
       -e RATE="$1" -e SECONDS="$2" -e BENCH_VUS="${BENCH_VUS:-}" \
       -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" \
       -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" -e BENCH_SPIKE_AT_MS="$spike_at_ms" \
+      -e BENCH_BUDGET_RAMP_SECONDS="${BENCH_BUDGET_RAMP_SECONDS:-0}" \
       "${4:-benchmarks/redirect.js}"
   else
     compose run --rm --no-deps -T -e RATE="$1" -e SECONDS="$2" \

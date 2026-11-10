@@ -471,3 +471,84 @@ between the tested rates of 3,250 and 3,500 redirects/s. Use **3,250 redirects/s
 as the validated local ceiling during Redis timeouts, with five Postgres
 connections and 10 link creations/s. Healthy Redis passed at 4,000/s in the
 initial sweep.
+
+### Ceiling with healthy Redis
+
+The healthy sweep uses the same five Postgres connections, 10 link creations/s,
+and 100 ms target. The 1,000 fixture codes are primed before each trial, and
+Redis replies pass through the benchmark proxy without added delay.
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=400 BENCH_RATES='5000 6500 8000' \
+  BENCH_BUDGET_CASES=healthy pnpm bench:redirect
+
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=800 BENCH_RATES='10000 15000 20000' \
+  BENCH_BUDGET_CASES=healthy pnpm bench:redirect
+```
+
+The first sweep passed at all three rates. All 585,007 redirects hit Redis and
+met the 100 ms target. All 902 creations returned `201`, with zero dropped
+starts. Redirect p99 was 7 ms at 5,000/s, 13 ms at 6,500/s, and 16 ms at 8,000/s.
+
+| Offered redirects/s | Redirects started | Within 100 ms of started | Redirect p99 (ms) | Creation p99 (ms) | Postgres lookups | Dropped starts |
+| ------------------: | ----------------: | -----------------------: | ----------------: | ----------------: | ---------------: | -------------: |
+|              10,000 |           300,007 |                   99.84% |                48 |               127 |              130 |              1 |
+|              15,000 |           440,912 |                   99.69% |                68 |            270.10 |              791 |          9,093 |
+|              20,000 |           493,412 |                   99.27% |                84 |             1,760 |            2,681 |        106,590 |
+
+Every creation returned `201` in the higher sweep. All three trials failed
+the zero-drop and all-cache-hit checks. At 20,000/s, k6 started roughly 16,450
+redirects/s during the 30-second window, while link creation p99 reached 1.76 s.
+The 99.27% latency score covers the requests k6 started.
+
+Repeat near the full-load boundary with the original worker count:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=400 BENCH_RATES='9000 10000 12500' \
+  BENCH_BUDGET_CASES=healthy pnpm bench:redirect
+```
+
+With 400 workers, the 9,000, 10,000, and 12,500/s runs dropped 132, 289, and
+3,217 starts respectively. At 12,500/s, every started redirect hit Redis and
+99.98% met 100 ms. To check the effect of stepping directly to full load, ramp
+from 1,000/s over eight seconds and start the 30-second measurement and creation
+traffic after the ramp. The no-drop check covers both phases.
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=800 BENCH_BUDGET_RAMP_SECONDS=8 \
+  BENCH_RATES='10000 15000 20000' BENCH_BUDGET_CASES=healthy pnpm bench:redirect
+```
+
+| Offered redirects/s | Redirects started after ramp | Within 100 ms of started | Redirect p99 (ms) | Creation p99 (ms) | Dropped starts including ramp |
+| ------------------: | ---------------------------: | -----------------------: | ----------------: | ----------------: | ----------------------------: |
+|              10,000 |                      299,076 |                   99.78% |                61 |            151.76 |                           930 |
+|              15,000 |                      433,293 |                   99.55% |                77 |               338 |                        16,722 |
+|              20,000 |                      496,788 |                   99.73% |                75 |            438.23 |                       104,851 |
+
+The ramped trials also fell short of the offered load. All creation requests
+returned `201`. At 20,000/s, k6 started about 16,560 redirects/s during the
+measured window.
+
+Check the full-load boundary again with 400 workers and a direct start:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=400 BENCH_RATES='8500 8000' \
+  BENCH_BUDGET_CASES=healthy pnpm bench:redirect
+```
+
+| Offered redirects/s | Redirects started | Within 100 ms of started | Redirect p99 (ms) | Postgres lookups | Dropped starts |
+| ------------------: | ----------------: | -----------------------: | ----------------: | ---------------: | -------------: |
+|               8,500 |           254,931 |                   99.93% |                23 |               16 |             69 |
+|               8,000 |           239,360 |                   99.90% |                23 |               84 |            640 |
+
+The highest full-load, all-cache-hit pass was the initial 8,000/s run. The
+8,000/s repeat dropped starts, so the result varied between runs. At higher
+rates the local setup fell short of delivering the requested load while
+started redirects continued to meet the 99% latency threshold. These trials
+show the limit of what the local benchmark verified with healthy Redis. They
+leave the service's 100 ms ceiling open at higher delivered rates.
