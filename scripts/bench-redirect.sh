@@ -3,12 +3,23 @@ set -efu
 
 project="shortlink-bench-$$"
 host_runner=${BENCH_HOST:-0}
+redis_runner=${BENCH_REDIS:-0}
 unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 
 if [ "$host_runner" = 1 ] && ! command -v k6 >/dev/null 2>&1; then
   printf 'BENCH_HOST=1 requires k6 on PATH.\n' >&2
   exit 1
 fi
+
+BENCH_REDIS_URL=
+if [ "$redis_runner" = 1 ]; then
+  if [ "${BENCH_FIXTURE_CONTROL:-0}" = 1 ]; then
+    printf 'Run the Redis and fixture controls separately.\n' >&2
+    exit 1
+  fi
+  BENCH_REDIS_URL=redis://redis:6379
+fi
+export BENCH_REDIS_URL
 
 compose() {
   if [ "$host_runner" = 1 ]; then
@@ -25,7 +36,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-compose --parallel 1 up --build -d --wait --wait-timeout 60 redirect-service
+set -- redirect-service
+if [ "$redis_runner" = 1 ]; then
+  set -- redis "$@"
+fi
+compose --parallel 1 up --build -d --wait --wait-timeout 60 "$@"
 compose exec -T postgres sh -c 'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   < benchmarks/seed.sql
 
@@ -55,6 +70,12 @@ stage() {
 seconds=${BENCH_SECONDS:-10}
 status=0
 
+measure() {
+  printf '\n%s requests/s for %s seconds with pool max %s (%s lookup)\n' \
+    "$1" "$seconds" "${BENCH_POOL_MAX:-5}" "$2"
+  stage "$1" "$seconds" "$2" || status=1
+}
+
 run_lookup() {
   if [ "$host_runner" = 1 ]; then
     set_host_target
@@ -63,11 +84,38 @@ run_lookup() {
   stage 20 3 "$1"
 
   for rate in ${BENCH_RATES:-50 150 300}; do
-    printf '\n%s requests/s for %s seconds with pool max %s (%s lookup)\n' \
-      "$rate" "$seconds" "${BENCH_POOL_MAX:-5}" "$1"
-    stage "$rate" "$seconds" "$1" || status=1
+    measure "$rate" "$1"
   done
 }
+
+redis_cli() {
+  compose exec -T redis redis-cli -e "$@"
+}
+
+if [ "$redis_runner" = 1 ]; then
+  if [ "$host_runner" = 1 ]; then
+    set_host_target
+  fi
+  printf '\nWarm-up: 20 requests/s for 3 seconds (Redis lookup)\n'
+  stage 20 3 redis-warm
+
+  for rate in ${BENCH_RATES:-50 150 300}; do
+    redis_cli FLUSHDB >/dev/null
+    test "$(redis_cli DBSIZE)" -eq 0
+    measure "$rate" redis-cold
+
+    redis_cli FLUSHDB >/dev/null
+    printf '\nPriming Redis through all 1,000 fixture redirects\n'
+    stage 20 15 redis-prime
+    cached_keys=$(redis_cli DBSIZE)
+    if [ "$cached_keys" -ne 1000 ]; then
+      printf 'Expected 1,000 cached fixture links, found %s.\n' "$cached_keys" >&2
+      exit 1
+    fi
+    measure "$rate" redis-warm
+  done
+  exit "$status"
+fi
 
 run_lookup postgres
 if [ "${BENCH_FIXTURE_CONTROL:-0}" = 1 ]; then

@@ -178,3 +178,35 @@ zero-drop threshold. The fixture stage delivered the target rate through the
 same HTTP path. The comparison shows what bypassing the database lookup can
 save in this setup. A Redis cache would have its own network and lookup costs,
 and cache misses would still go to Postgres.
+
+## Cold and warm Redis at 7,500 requests/s
+
+Run the Postgres baseline and both Redis stages with k6 2.3.0 on `PATH`:
+
+```sh
+for redis_mode in 0 1; do
+  BENCH_REDIS="$redis_mode" BENCH_HOST=1 BENCH_PORT=38175 BENCH_VUS=240 \
+    BENCH_POOL_MAX=5 BENCH_RATES=7500 BENCH_SECONDS=30 pnpm bench:redirect
+done
+```
+
+Both modes used the same 1,000 links, Mac runner, and loopback port. Redis mode
+starts a disposable Redis service, clears it after the app warm-up, and runs
+the cold stage. It then clears Redis again, visits each fixture once through
+Fastify, and checks that all 1,000 keys are present before the warm stage.
+
+| Redirect lookup | Achieved req/s | HTTP p99 (ms) | Redis hits | Postgres lookups | Dropped starts |
+| :-------------- | -------------: | ------------: | ---------: | ---------------: | -------------: |
+| Postgres only   |       6,091.07 |         65.88 |      0.00% |          182,898 |         42,103 |
+| Cold Redis      |       7,440.31 |         18.86 |     99.53% |            1,028 |          1,785 |
+| Warm Redis      |       7,497.61 |          7.15 |    100.00% |                0 |             66 |
+
+Hit rate and lookup counts cover successful redirects in the timed stages.
+The warm stage's 1,000 priming lookups are counted separately. Every issued
+request returned the expected redirect. All three stages failed the zero-drop
+threshold, with the warm stage skipping 66 of 225,001 scheduled starts.
+
+Of the 21,327 successful requests that started in the first three seconds of
+the cold stage, 20,299 hit Redis (95.17%). All 1,028 Postgres lookups occurred
+in that window, where HTTP p99 was 106.23 ms. The full-stage numbers mostly
+reflect a filled cache because the workload cycles through the same 1,000 codes.
