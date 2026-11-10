@@ -6,6 +6,7 @@ host_runner=${BENCH_HOST:-0}
 redis_runner=${BENCH_REDIS:-0}
 hot_key_runner=${BENCH_HOT_KEY:-0}
 spike_runner=${BENCH_HOT_SPIKE:-0}
+budget_runner=${BENCH_LATENCY_BUDGET:-0}
 expiry_at_ms=0
 spike_at_ms=0
 unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
@@ -25,6 +26,11 @@ if [ "$spike_runner" = 1 ] && { [ "$hot_key_runner" != 1 ] || [ "$host_runner" !
   exit 1
 fi
 
+if [ "$budget_runner" = 1 ] && { [ "$redis_runner" != 1 ] || [ "$host_runner" != 1 ] || [ "$hot_key_runner" = 1 ]; }; then
+  printf 'BENCH_LATENCY_BUDGET=1 requires BENCH_REDIS=1 BENCH_HOST=1 and a spread of codes.\n' >&2
+  exit 1
+fi
+
 BENCH_REDIS_URL=
 if [ "$redis_runner" = 1 ]; then
   if [ "${BENCH_FIXTURE_CONTROL:-0}" = 1 ]; then
@@ -32,10 +38,16 @@ if [ "$redis_runner" = 1 ]; then
     exit 1
   fi
   BENCH_REDIS_URL=redis://redis:6379
+  if [ "$budget_runner" = 1 ]; then
+    BENCH_REDIS_URL=redis://redis-proxy:6379
+  fi
 fi
 export BENCH_REDIS_URL
 
 compose() {
+  if [ "$budget_runner" = 1 ]; then
+    set -- -f benchmarks/compose.budget.yaml "$@"
+  fi
   if [ "$host_runner" = 1 ]; then
     set -- -f benchmarks/compose.host.yaml "$@"
   fi
@@ -49,6 +61,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+proxy_cli() {
+  compose exec -T redis-proxy /toxiproxy-cli "$@"
+}
+
+if [ "$budget_runner" = 1 ]; then
+  compose up -d --wait --wait-timeout 30 redis redis-proxy
+  proxy_cli create -l 0.0.0.0:6379 -u redis:6379 redis
+fi
 
 set -- redirect-service
 if [ "$redis_runner" = 1 ]; then
@@ -76,7 +97,7 @@ stage() {
       -e RATE="$1" -e SECONDS="$2" -e BENCH_VUS="${BENCH_VUS:-}" \
       -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" \
       -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" -e BENCH_SPIKE_AT_MS="$spike_at_ms" \
-      benchmarks/redirect.js
+      "${4:-benchmarks/redirect.js}"
   else
     compose run --rm --no-deps -T -e RATE="$1" -e SECONDS="$2" \
       -e BENCH_VUS="${BENCH_VUS:-}" -e BENCH_LOOKUP="$3" \
@@ -111,6 +132,26 @@ redis_cli() {
 
 redis_stat() {
   printf '%s\n' "$1" | awk -F: -v name="$2" '$1 == name { sub(/\r$/, "", $2); print $2 }'
+}
+
+run_latency_budget() {
+  budget_seconds=${BENCH_SECONDS:-30}
+  for budget_case in healthy timeout timeout healthy healthy timeout; do
+    redis_cli FLUSHDB >/dev/null
+    printf '\nPriming Redis through the 1,000 fixture redirects\n'
+    stage 20 15 redis-prime
+    test "$(redis_cli DBSIZE)" -eq 1000
+
+    if [ "$budget_case" = timeout ]; then
+      proxy_cli toxic add -t latency -a latency=75 redis
+    fi
+    printf '\nLatency budget (%s): 1,000 redirects/s and 10 creations/s for %s seconds.\n' \
+      "$budget_case" "$budget_seconds"
+    stage 1000 "$budget_seconds" "redis-$budget_case" benchmarks/latency-budget.js || status=1
+    if [ "$budget_case" = timeout ]; then
+      proxy_cli toxic remove -n latency_downstream redis
+    fi
+  done
 }
 
 measure_hot_key() {
@@ -159,6 +200,10 @@ measure_hot_spike() {
 if [ "$redis_runner" = 1 ]; then
   if [ "$host_runner" = 1 ]; then
     set_host_target
+  fi
+  if [ "$budget_runner" = 1 ]; then
+    run_latency_budget
+    exit "$status"
   fi
   if [ "$hot_key_runner" = 1 ]; then
     printf '\nWarm-up: 20 requests/s for 3 seconds (one hot key)\n'

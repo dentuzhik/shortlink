@@ -315,3 +315,42 @@ falls back to Postgres when a Redis read fails, and this path bypasses
 coalescing. These runs verify that requests shared the cache refill during the
 spike, but the warm controls also degraded, so the test cannot isolate a
 capacity limit or establish that expiry has no latency cost.
+
+## Redirect latency budget with concurrent link creation
+
+With k6 2.3.0 on `PATH`, run:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 pnpm bench:redirect
+```
+
+The benchmark primes 1,000 fixture codes before each trial. Each measured run
+schedules 1,000 redirects/s and 10 `POST /links` requests/s for 30 seconds.
+There are three runs per condition, alternating which condition goes first in
+each pair. Fastify talks to Redis through Toxiproxy in both conditions. The
+timeout trials delay Redis replies by 75 ms, past Fastify's 25 ms Redis command
+timeout. Response headers verify that healthy redirects use Redis and that
+redirects in the timeout trials use Postgres or share an in-flight lookup.
+
+The client measures elapsed time around each request. A redirect counts toward
+each cutoff if it returns `302` with the expected `Location` within that cutoff.
+Failures count against the score, and dropped starts fail the workload check.
+k6 also records link creation status and elapsed time, plus pool checkout and
+query time when Fastify reports them in `Server-Timing`.
+
+| Trial     | Redirects | Redirect p99 (ms) | Slowest redirect (ms) | Link creation p99 (ms) | Pool checkout p99 (ms) |
+| :-------- | --------: | ----------------: | --------------------: | ---------------------: | ---------------------: |
+| Healthy 1 |    30,000 |                 3 |                    10 |                      6 |                      — |
+| Timeout 1 |    30,001 |                28 |                    45 |                      5 |                  0.064 |
+| Timeout 2 |    30,000 |                30 |                    55 |                      5 |                  0.060 |
+| Healthy 2 |    30,000 |                 2 |                     8 |                      5 |                      — |
+| Healthy 3 |    30,001 |                 3 |                    10 |                      4 |                      — |
+| Timeout 3 |    30,001 |                28 |                    33 |                      4 |                  0.051 |
+
+All 180,003 redirects were correct and within 100 ms, so all three cutoffs
+scored 100%. All 1,806 creations returned `201` and k6 dropped zero starts.
+Every measured healthy redirect hit Redis and every timeout redirect queried
+Postgres. These measurements support a provisional 100 ms redirect budget at
+this workload on the local stack. The steady load generated little pool
+contention, with checkout p99 below 0.1 ms in all timeout trials.

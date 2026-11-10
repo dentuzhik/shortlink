@@ -1,0 +1,9 @@
+services:
+  redis-proxy:
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    command: ["-host=127.0.0.1"]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 1s
+      timeout: 2s
+      retries: 10
