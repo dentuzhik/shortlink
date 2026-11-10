@@ -1,7 +1,10 @@
 import { buildApp } from "./app.js";
 import { readDatabaseUrl } from "./database.js";
 
-const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL));
+const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
+  poolMax: Number(process.env.DB_POOL_MAX ?? 5),
+  reportPoolWait: process.env.DB_POOL_TIMING === "1",
+});
 
 async function shutdown(signal: string) {
   app.log.info({ signal }, "Shutting down");

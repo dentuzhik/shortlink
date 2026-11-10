@@ -30,7 +30,8 @@ stage 20 3
 seconds=${BENCH_SECONDS:-10}
 status=0
 for rate in ${BENCH_RATES:-50 150 300}; do
-  printf '\nBaseline: %s requests/s for %s seconds\n' "$rate" "$seconds"
+  printf '\n%s requests/s for %s seconds with pool max %s\n' \
+    "$rate" "$seconds" "${BENCH_POOL_MAX:-5}"
   stage "$rate" "$seconds" || status=1
 done
 exit "$status"

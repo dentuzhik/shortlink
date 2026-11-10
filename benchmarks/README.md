@@ -23,6 +23,30 @@ latency at later stages does not establish that more traffic improves latency:
 the stages were short, always ran in the same order, and shared VM resources.
 These numbers are a local reference for the same workload.
 
-Next experiment: repeat the workload with a smaller pool and measure how long
-requests wait to acquire a connection. Keep the data, rates, and environment
-the same so we can attribute changes to the pool more confidently.
+## One vs. five Postgres connections
+
+Run both pool limits at 1,000 requests/s for 30 seconds each:
+
+```sh
+for pool_max in 1 5; do
+  BENCH_POOL_MAX="$pool_max" BENCH_RATES=1000 BENCH_SECONDS=30 pnpm bench:redirect
+done
+```
+
+Each run seeds a fresh database with the same 1,000 links and warms up at
+20 requests/s for three seconds. In the benchmark stack, Fastify reports
+`db_pool` in the `Server-Timing` header and k6 records it as `db_pool_acquire`.
+The timer ends when `pool.connect()` returns a client, before the lookup runs.
+It includes any queueing and the cost of opening a connection if needed.
+
+| Pool max | Achieved req/s | Checkout p95 (µs) | Checkout p99 (µs) | HTTP p95 (ms) | HTTP p99 (ms) | HTTP failures | Dropped iterations |
+| -------: | -------------: | ----------------: | ----------------: | ------------: | ------------: | ------------: | -----------------: |
+|        1 |       1,000.00 |               101 |               179 |          0.43 |          1.24 |             0 |                  0 |
+|        5 |       1,000.01 |                15 |                34 |          0.46 |          1.27 |             0 |                  0 |
+
+One connection increased checkout time, while HTTP tail latency was similar in
+these short runs. An earlier run in the opposite order also showed longer
+checkouts with one connection. In that run k6 dropped two scheduled iterations
+with one connection, and every request it sent succeeded. The single-replica
+workload uses a small dataset and redirect reads, so this comparison measures
+pool behavior for that workload.

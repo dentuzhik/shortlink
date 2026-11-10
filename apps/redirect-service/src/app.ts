@@ -6,12 +6,15 @@ import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
 import { registerRedirectRoute } from "./redirect.js";
 
-export function buildApp(databaseUrl: string) {
+export function buildApp(
+  databaseUrl: string,
+  { poolMax = 5, reportPoolWait = false } = {},
+) {
   const app = Fastify({
     logger: true,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
-  const pool = createDatabasePool(databaseUrl);
+  const pool = createDatabasePool(databaseUrl, poolMax);
 
   pool.on("error", (error) => {
     // Pool errors can include the database client. Log only the message.
@@ -40,7 +43,7 @@ export function buildApp(databaseUrl: string) {
   const linkStore = createLinkStore(pool);
   registerLinkRoutes(app, linkStore);
   registerGraphQL(app, createLinkCreator(linkStore));
-  registerRedirectRoute(app, linkStore.findTargetUrl);
+  registerRedirectRoute(app, linkStore.findTargetUrl, reportPoolWait);
 
   return app;
 }

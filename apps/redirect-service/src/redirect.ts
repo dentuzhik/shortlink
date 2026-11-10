@@ -2,14 +2,26 @@ import type { FastifyInstance } from "fastify";
 
 export function registerRedirectRoute(
   app: FastifyInstance,
-  findTargetUrl: (code: string) => Promise<string | undefined>,
+  findTargetUrl: (
+    code: string,
+    onPoolWait?: (milliseconds: number) => void,
+  ) => Promise<string | undefined>,
+  reportPoolWait = false,
 ) {
   app.get<{ Params: { code: string } }>("/:code", async (request, reply) => {
     // A cached 404 could also hide a link that is created later.
     reply.header("Cache-Control", "no-store");
 
     try {
-      const targetUrl = await findTargetUrl(request.params.code);
+      const { code } = request.params;
+      const targetUrl = reportPoolWait
+        ? await findTargetUrl(code, (milliseconds) => {
+            reply.header(
+              "Server-Timing",
+              `db_pool;dur=${milliseconds.toFixed(3)}`,
+            );
+          })
+        : await findTargetUrl(code);
       if (targetUrl === undefined) {
         return reply.code(404).send({ error: "Link not found" });
       }

@@ -16,10 +16,17 @@ export function readDatabaseUrl(value: string | undefined): string {
   return url.href;
 }
 
-export function createDatabasePool(connectionString: string): Pool {
+export function createDatabasePool(
+  connectionString: string,
+  max: number,
+): Pool {
+  if (!Number.isSafeInteger(max) || max < 1) {
+    throw new Error("DB_POOL_MAX must be a positive integer");
+  }
+
   return new Pool({
     connectionString,
-    max: 5,
+    max,
     // Bound the wait for a connection and a query result separately.
     connectionTimeoutMillis: 500,
     query_timeout: 500,

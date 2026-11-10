@@ -3,6 +3,9 @@ services:
     ports: !reset []
   redirect-service:
     ports: !reset []
+    environment:
+      DB_POOL_MAX: ${BENCH_POOL_MAX:-5}
+      DB_POOL_TIMING: "1"
   k6:
     image: grafana/k6:2.3.0
     environment:

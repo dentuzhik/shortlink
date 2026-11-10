@@ -1,6 +1,7 @@
 import { check } from "k6";
 import exec from "k6/execution";
 import http from "k6/http";
+import { Trend } from "k6/metrics";
 
 const rate = Number(__ENV.RATE);
 const seconds = Number(__ENV.SECONDS);
@@ -13,6 +14,7 @@ if (!Number.isInteger(seconds) || seconds < 1 || seconds > 120) {
 }
 
 http.setResponseCallback(http.expectedStatuses(302));
+const poolAcquisition = new Trend("db_pool_acquire", true);
 
 export const options = {
   discardResponseBodies: true,
@@ -45,9 +47,16 @@ export default function () {
     timeout: "2s",
     tags: { name: "GET /:code" },
   });
+  const timing = /^db_pool;dur=(\d+(?:\.\d+)?)$/.exec(
+    response.headers["Server-Timing"] ?? "",
+  );
+  if (timing) {
+    poolAcquisition.add(Number(timing[1]));
+  }
   check(response, {
     "302 with the expected Location": (res) =>
       res.status === 302 &&
       res.headers.Location === `https://example.com/benchmark/${code}`,
+    "pool acquisition timing reported": () => timing !== null,
   });
 }
