@@ -386,3 +386,88 @@ starts. Pool checkout p99 rose from below 0.1 ms at the 1,000/s baseline to
 roughly 1 ms at 2,000/s. The 2,000/s trials establish steady load headroom above
 the target on this local setup. Choosing an entry limit also requires a burst
 profile and measurements on the deployment it will protect.
+
+### Throughput ceiling at 100 ms
+
+The ceiling probe holds link creation at 10 requests/s, uses five Postgres
+connections, and varies the offered redirect rate on the local Compose stack.
+Each condition is measured separately. A passing rate delivers the scheduled
+load with zero dropped starts, returns `201` for every creation, and returns
+the correct redirect within 100 ms for at least 99% of redirect attempts.
+
+Run the initial 30-second sweep with k6 2.3.0 on `PATH`:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_RATES='2500 3000 4000' \
+  BENCH_BUDGET_CASES='healthy timeout' pnpm bench:redirect
+```
+
+| Redis condition | Redirects/s | Within 100 ms | Redirect p99 (ms) | Pool checkout p99 (ms) | DB lookup p99 (ms) | Creation p99 (ms) | Dropped starts |
+| :-------------- | ----------: | ------------: | ----------------: | ---------------------: | -----------------: | ----------------: | -------------: |
+| Healthy         |       2,500 |          100% |                 4 |                      — |                  — |                 7 |              0 |
+| Timeout         |       2,500 |          100% |                51 |                  14.92 |               3.03 |                17 |              0 |
+| Healthy         |       3,000 |          100% |                 4 |                      — |                  — |                 9 |              0 |
+| Timeout         |       3,000 |          100% |                64 |                  28.20 |               3.54 |             40.20 |              0 |
+| Healthy         |       4,000 |          100% |                 6 |                      — |                  — |                 9 |              0 |
+| Timeout         |       4,000 |        81.90% |               152 |                 119.77 |               4.63 |               128 |          4,491 |
+
+At 4,000/s with Redis timing out, 81.90% of the 115,510 redirects that k6
+started met the target. Pool checkout p99 exceeded the entire 100 ms budget
+while lookup p99 remained below 5 ms. The run also exhausted its 400 k6
+workers, so the boundary check uses more workers to see whether the service
+can receive the full offered load.
+
+Probe the timeout boundary for 45 seconds with larger k6 worker allowances:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_SECONDS=45 BENCH_VUS=800 \
+  BENCH_RATES='3500 4000' BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_SECONDS=45 BENCH_VUS=1200 \
+  BENCH_RATES='3250 3500 3250' BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_SECONDS=45 BENCH_VUS=400 \
+  BENCH_RATES='3000 3250' BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+```
+
+| k6 workers | Redirects/s | Within 100 ms | Redirect p99 (ms) | Pool checkout p99 (ms) | DB lookup p99 (ms) | Creation success | Dropped starts |
+| ---------: | ----------: | ------------: | ----------------: | ---------------------: | -----------------: | ---------------: | -------------: |
+|        800 |       3,500 |        75.70% |               244 |                 211.61 |               5.13 |             100% |            575 |
+|        800 |       4,000 |        35.63% |               250 |                 218.48 |               5.67 |             100% |          5,168 |
+|      1,200 |       3,250 |        94.96% |             2,000 |                  77.27 |               4.43 |           44.00% |              0 |
+|      1,200 |       3,500 |        94.33% |             2,000 |                  85.74 |               4.27 |           37.33% |              0 |
+|      1,200 |       3,250 |        95.49% |             2,000 |                 108.21 |               4.23 |           44.00% |              0 |
+|        400 |       3,000 |          100% |                64 |                  29.43 |               3.74 |             100% |              0 |
+|        400 |       3,250 |          100% |                58 |                  26.40 |               3.43 |             100% |              0 |
+
+The 1,200-worker runs delivered all scheduled starts, with HTTP transport
+failures on both endpoints. In both 3,250/s trials, more than 1% of redirect
+attempts also returned the correct result too late. The last pair returns to
+the original 400 workers to compare the two closest rates under the same setup
+as the initial sweep.
+
+Run a matched 30-second comparison with the original worker count:
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=400 BENCH_RATES='3500 3250' \
+  BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+```
+
+| Redirects/s | Within 100 ms | Redirect p99 (ms) | Pool checkout p99 (ms) | DB lookup p99 (ms) | Creation p99 (ms) | Dropped starts |
+| ----------: | ------------: | ----------------: | ---------------------: | -----------------: | ----------------: | -------------: |
+|       3,500 |        94.78% |               139 |                 104.46 |               4.63 |            114.01 |            939 |
+|       3,250 |          100% |                74 |                  37.14 |               3.57 |                43 |              0 |
+
+With 400 workers, 3,250/s passed both the 30- and 45-second trials. At 3,500/s,
+all 104,062 redirects that started returned the correct destination, but only
+94.78% did so within 100 ms. Every creation in the matched pair returned `201`.
+The local benchmark puts the 100 ms throughput ceiling for Redis timeouts
+between the tested rates of 3,250 and 3,500 redirects/s. Use **3,250 redirects/s**
+as the validated local ceiling during Redis timeouts, with five Postgres
+connections and 10 link creations/s. Healthy Redis passed at 4,000/s in the
+initial sweep.
