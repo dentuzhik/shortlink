@@ -360,3 +360,29 @@ scored 100%. All 1,806 creations returned `201` and k6 dropped zero starts.
 Every measured healthy redirect hit Redis and every timeout redirect queried
 Postgres. The steady load generated little pool contention, with checkout p99
 below 0.1 ms in all timeout trials.
+
+### Headroom with Redis reads timing out
+
+Run two 30-second trials at each higher redirect rate, reversing the order in
+the second pair. Link creation stays at 10 requests/s and the pool has five
+connections. The benchmark applies the same 100 ms check at each rate.
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_RATES='1500 2000 2000 1500' \
+  BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+```
+
+| Redirects/s | Redirects | Redirect p99 (ms) | Slowest redirect (ms) | Pool checkout p99 (ms) | DB lookup p99 (ms) | Link creation p99 (ms) |
+| ----------: | --------: | ----------------: | --------------------: | ---------------------: | -----------------: | ---------------------: |
+|       1,500 |    45,000 |                32 |                    59 |                  0.301 |               2.06 |                     11 |
+|       2,000 |    60,001 |                32 |                    61 |                  0.952 |               2.13 |                      8 |
+|       2,000 |    60,001 |                33 |                    54 |                   1.22 |               2.14 |                      9 |
+|       1,500 |    45,001 |                30 |                    49 |                  0.092 |               1.31 |                      8 |
+
+All 210,003 redirects queried Postgres and returned the correct destination
+within 100 ms. All 1,202 link creations returned `201`, and k6 dropped zero
+starts. Pool checkout p99 rose from below 0.1 ms at the 1,000/s baseline to
+roughly 1 ms at 2,000/s. The 2,000/s trials establish steady load headroom above
+the target on this local setup. Choosing an entry limit also requires a burst
+profile and measurements on the deployment it will protect.

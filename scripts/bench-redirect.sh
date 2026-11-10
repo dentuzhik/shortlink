@@ -136,21 +136,31 @@ redis_stat() {
 
 run_latency_budget() {
   budget_seconds=${BENCH_SECONDS:-30}
-  for budget_case in healthy timeout timeout healthy healthy timeout; do
-    redis_cli FLUSHDB >/dev/null
-    printf '\nPriming Redis through the 1,000 fixture redirects\n'
-    stage 20 15 redis-prime
-    test "$(redis_cli DBSIZE)" -eq 1000
+  budget_cases=${BENCH_BUDGET_CASES:-healthy timeout timeout healthy healthy timeout}
+  for budget_case in $budget_cases; do
+    case "$budget_case" in
+      healthy|timeout) ;;
+      *) printf 'Unknown latency budget case: %s\n' "$budget_case" >&2; return 1 ;;
+    esac
+  done
 
-    if [ "$budget_case" = timeout ]; then
-      proxy_cli toxic add -t latency -a latency=75 redis
-    fi
-    printf '\nLatency budget (%s): 1,000 redirects/s and 10 creations/s for %s seconds.\n' \
-      "$budget_case" "$budget_seconds"
-    stage 1000 "$budget_seconds" "redis-$budget_case" benchmarks/latency-budget.js || status=1
-    if [ "$budget_case" = timeout ]; then
-      proxy_cli toxic remove -n latency_downstream redis
-    fi
+  for budget_rate in ${BENCH_RATES:-1000}; do
+    for budget_case in $budget_cases; do
+      redis_cli FLUSHDB >/dev/null
+      printf '\nPriming Redis through the 1,000 fixture redirects\n'
+      stage 20 15 redis-prime
+      test "$(redis_cli DBSIZE)" -eq 1000
+
+      if [ "$budget_case" = timeout ]; then
+        proxy_cli toxic add -t latency -a latency=75 redis
+      fi
+      printf '\nLatency budget (%s): %s redirects/s and 10 creations/s for %s seconds.\n' \
+        "$budget_case" "$budget_rate" "$budget_seconds"
+      stage "$budget_rate" "$budget_seconds" "redis-$budget_case" benchmarks/latency-budget.js || status=1
+      if [ "$budget_case" = timeout ]; then
+        proxy_cli toxic remove -n latency_downstream redis
+      fi
+    done
   done
 }
 
