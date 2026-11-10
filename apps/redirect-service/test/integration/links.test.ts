@@ -129,6 +129,7 @@ describe("links with Postgres", () => {
 
   describe("redirect cache with Redis", () => {
     const targetUrl = "https://example.com/cached";
+    const poolMax = 5;
     let container: StartedTestContainer | undefined;
     let redis: Redis;
     let redisUrl: string;
@@ -142,6 +143,7 @@ describe("links with Postgres", () => {
       redis = new Redis(redisUrl, { lazyConnect: true, commandTimeout: 3000 });
       await redis.connect();
       cachedApp = buildApp(databaseUrl, {
+        poolMax,
         redisUrl,
         reportCacheHit: true,
         reportPoolWait: true,
@@ -317,6 +319,71 @@ describe("links with Postgres", () => {
           expect(hit.headers["x-cache"]).toBe("HIT");
           expect(hit.headers.location).toBe(cachedUrl);
         });
+      } finally {
+        debug.mockRestore();
+        await locker.end();
+      }
+    });
+
+    test("queues distinct codes behind the Postgres pool during Redis read timeouts", async () => {
+      const requestCount = 20;
+      const codes = await Promise.all(
+        Array.from({ length: requestCount }, createLink),
+      );
+      expect(new Set(codes).size).toBe(requestCount);
+
+      const locker = new Client({ connectionString: databaseUrl });
+      await locker.connect();
+      const debug = vi.spyOn(cachedApp.log, "debug");
+      try {
+        // Hold checked-out connections long enough to observe the pool filling.
+        await locker.query("BEGIN");
+        await locker.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+        await redis.call("CLIENT", "PAUSE", "500", "ALL");
+        try {
+          const redirects = Promise.all(
+            codes.map((code) => cachedApp.inject(`/${code}`)),
+          );
+          const observation = vi
+            .waitFor(
+              async () => {
+                const { rows } = await locker.query<{ blocked: number }>(`
+                  SELECT count(*)::int AS blocked
+                  FROM pg_locks
+                  WHERE relation = 'links'::regclass
+                    AND mode = 'AccessShareLock'
+                    AND NOT granted
+                `);
+                const readFailures = debug.mock.calls.filter(
+                  ([, message]) => message === "Redis redirect lookup failed",
+                ).length;
+                expect(readFailures).toBe(requestCount);
+                expect(rows[0]?.blocked).toBe(poolMax);
+              },
+              { interval: 10, timeout: 300 },
+            )
+            .finally(() => locker.query("ROLLBACK"));
+          const [responses] = await Promise.all([redirects, observation]);
+          const checkoutTimes = responses.map((response) => {
+            expect(response.statusCode).toBe(302);
+            expect(response.headers.location).toBe(targetUrl);
+            expect(response.headers["x-cache"]).toBeUndefined();
+            const timing =
+              /^db_pool;dur=(\d+\.\d+), db_lookup;dur=\d+\.\d+$/.exec(
+                String(response.headers["server-timing"]),
+              );
+            expect(timing).not.toBeNull();
+            return Number(timing?.[1]);
+          });
+
+          if (process.env.REPORT_OUTAGE_POOL_TIMING === "1") {
+            console.info(
+              `Redis outage burst: ${poolMax} queries reached Postgres, ${requestCount - poolMax} waited for a connection. Pool checkout ranged from ${Math.min(...checkoutTimes)} to ${Math.max(...checkoutTimes)} ms.`,
+            );
+          }
+        } finally {
+          await redis.call("CLIENT", "UNPAUSE");
+        }
       } finally {
         debug.mockRestore();
         await locker.end();
