@@ -257,23 +257,69 @@ describe("links with Postgres", () => {
       expect(await redis.get(`shortlink:redirect:${code}`)).toBeNull();
     });
 
-    test("uses Postgres when a Redis read times out", async () => {
+    test("shares one Postgres lookup across concurrent Redis read timeouts", async () => {
       const code = await createLink();
-      await redis.set(`shortlink:redirect:${code}`, targetUrl, "EX", 60);
+      const cachedUrl = "https://example.com/previous-destination";
+      await redis.set(`shortlink:redirect:${code}`, cachedUrl, "EX", 60);
       expect((await cachedApp.inject(`/${code}`)).headers["x-cache"]).toBe(
         "HIT",
       );
 
-      await redis.call("CLIENT", "PAUSE", "1000", "ALL");
+      const locker = new Client({ connectionString: databaseUrl });
+      await locker.connect();
+      const debug = vi.spyOn(cachedApp.log, "debug");
+      const requestCount = 6;
       try {
-        const response = await cachedApp.inject(`/${code}`);
+        await locker.query("BEGIN");
+        await locker.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+        await redis.call("CLIENT", "PAUSE", "500", "ALL");
+        try {
+          const redirects = Promise.all(
+            Array.from({ length: requestCount }, () =>
+              cachedApp.inject(`/${code}`),
+            ),
+          );
+          const releaseLookup = (async () => {
+            try {
+              // Keep the lookup open until all six Redis reads have timed out.
+              await expect
+                .poll(
+                  () =>
+                    debug.mock.calls.filter(
+                      ([, message]) =>
+                        message === "Redis redirect lookup failed",
+                    ).length,
+                  { interval: 10, timeout: 300 },
+                )
+                .toBe(requestCount);
+            } finally {
+              await locker.query("ROLLBACK");
+            }
+          })();
+          const [responses] = await Promise.all([redirects, releaseLookup]);
 
-        expect(response.statusCode).toBe(302);
-        expect(response.headers.location).toBe(targetUrl);
-        expect(response.headers["x-cache"]).toBeUndefined();
-        expect(response.headers["server-timing"]).toContain("db_lookup");
+          const leaders = responses.filter((r) => r.headers["server-timing"]);
+          expect(leaders).toHaveLength(1);
+          expect(leaders[0]?.headers["server-timing"]).toContain("db_lookup");
+          for (const response of responses) {
+            expect(response.statusCode).toBe(302);
+            expect(response.headers.location).toBe(targetUrl);
+            expect(response.headers["x-cache"]).toBe(
+              response === leaders[0] ? undefined : "COALESCED",
+            );
+          }
+        } finally {
+          await redis.call("CLIENT", "UNPAUSE");
+        }
+
+        await vi.waitFor(async () => {
+          const hit = await cachedApp.inject(`/${code}`);
+          expect(hit.headers["x-cache"]).toBe("HIT");
+          expect(hit.headers.location).toBe(cachedUrl);
+        });
       } finally {
-        await redis.call("CLIENT", "UNPAUSE");
+        debug.mockRestore();
+        await locker.end();
       }
     });
 

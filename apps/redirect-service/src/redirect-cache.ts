@@ -15,7 +15,7 @@ export function createRedirectCache(
     enableOfflineQueue: false,
     autoResendUnfulfilledCommands: false,
   });
-  const pendingFills = new Map<string, Promise<string | undefined>>();
+  const pendingLookups = new Map<string, Promise<string | undefined>>();
 
   redis.on("error", (error) => {
     log.warn({ errorType: error.name }, "Redis connection error");
@@ -27,7 +27,7 @@ export function createRedirectCache(
     onCacheSource,
   ) => {
     const key = `shortlink:redirect:${code}`;
-    let cachedUrl: string | null;
+    let cachedUrl: string | null | undefined;
 
     try {
       cachedUrl = await redis.get(key);
@@ -36,27 +36,27 @@ export function createRedirectCache(
         { errorType: error instanceof Error ? error.name : "unknown" },
         "Redis redirect lookup failed",
       );
-      return findInPostgres(code, onDatabaseTiming);
+      cachedUrl = undefined;
     }
 
-    if (cachedUrl !== null) {
+    if (typeof cachedUrl === "string") {
       onCacheSource?.("HIT");
       return cachedUrl;
     }
 
-    const existingFill = pendingFills.get(code);
-    if (existingFill) {
-      const targetUrl = await existingFill;
+    const existingLookup = pendingLookups.get(code);
+    if (existingLookup) {
+      const targetUrl = await existingLookup;
       if (targetUrl !== undefined) {
         onCacheSource?.("COALESCED");
       }
       return targetUrl;
     }
 
-    // Keep sharing the lookup while Redis is still being filled.
-    const fill = (async () => {
+    const lookup = (async () => {
       const targetUrl = await findInPostgres(code, onDatabaseTiming);
-      if (targetUrl !== undefined) {
+      // Only a confirmed miss permits a cache fill.
+      if (cachedUrl === null && targetUrl !== undefined) {
         try {
           await redis.set(key, targetUrl, "EX", ttlSeconds);
         } catch (error) {
@@ -68,12 +68,12 @@ export function createRedirectCache(
       }
       return targetUrl;
     })();
-    pendingFills.set(code, fill);
+    pendingLookups.set(code, lookup);
 
     try {
-      return await fill;
+      return await lookup;
     } finally {
-      pendingFills.delete(code);
+      pendingLookups.delete(code);
     }
   };
 
