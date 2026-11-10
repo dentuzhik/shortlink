@@ -4,7 +4,7 @@ export function registerRedirectRoute(
   app: FastifyInstance,
   findTargetUrl: (
     code: string,
-    onPoolWait?: (milliseconds: number) => void,
+    onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
   ) => Promise<string | undefined>,
   reportPoolWait = false,
 ) {
@@ -15,10 +15,10 @@ export function registerRedirectRoute(
     try {
       const { code } = request.params;
       const targetUrl = reportPoolWait
-        ? await findTargetUrl(code, (milliseconds) => {
+        ? await findTargetUrl(code, (checkoutMs, lookupMs) => {
             reply.header(
               "Server-Timing",
-              `db_pool;dur=${milliseconds.toFixed(3)}`,
+              `db_pool;dur=${checkoutMs.toFixed(3)}, db_lookup;dur=${lookupMs.toFixed(3)}`,
             );
           })
         : await findTargetUrl(code);

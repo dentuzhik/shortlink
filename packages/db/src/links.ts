@@ -33,9 +33,9 @@ export function createLinkStore(pool: Pool) {
 
     async findTargetUrl(
       code: string,
-      onPoolWait?: (milliseconds: number) => void,
+      onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
     ) {
-      if (!onPoolWait) {
+      if (!onDatabaseTiming) {
         return selectTargetUrl(db, code);
       }
 
@@ -49,8 +49,11 @@ export function createLinkStore(pool: Pool) {
       // The pool's idle error listener is detached while we own the client.
       client.on("error", onClientError);
       try {
-        onPoolWait(waitMs);
-        return await selectTargetUrl(drizzle({ client }), code);
+        const lookupDb = drizzle({ client });
+        const lookupStartedAt = performance.now();
+        const targetUrl = await selectTargetUrl(lookupDb, code);
+        onDatabaseTiming(waitMs, performance.now() - lookupStartedAt);
+        return targetUrl;
       } catch (error) {
         discardClient = true;
         throw error;

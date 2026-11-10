@@ -85,3 +85,42 @@ Checkout and HTTP tail latency both rose at 5,000 requests/s. The CPU snapshots
 can miss short spikes, and the checkout timer includes the time for Node to
 resume the waiting request. These measurements leave Postgres's capacity limit
 undetermined.
+
+## Load probe with k6 on the Mac
+
+Put [k6 2.3.0](https://github.com/grafana/k6/releases/tag/v2.3.0) on `PATH` and run:
+
+```sh
+BENCH_HOST=1 BENCH_VUS=240 BENCH_POOL_MAX=5 \
+  BENCH_RATES='5000 7500 10000' BENCH_SECONDS=30 pnpm bench:redirect
+```
+
+`BENCH_HOST=1` runs k6 on the host and publishes Fastify on a temporary
+loopback port. Postgres stays inside Compose. `BENCH_VUS` sets both the starting
+and maximum worker count. The benchmark uses the same 1,000 links and the same
+five-connection pool in both modes. Run the in-VM control with:
+
+```sh
+BENCH_VUS=240 BENCH_POOL_MAX=5 BENCH_RATES=5000 BENCH_SECONDS=30 pnpm bench:redirect
+```
+
+`db_pool_acquire` measures the time to get a connection. `db_lookup` measures the
+subsequent lookup from Node, including the driver and its round trip to Postgres.
+
+| k6 location | Target req/s | Achieved req/s | HTTP p99 (ms) | Checkout p99 (ms) | Lookup p99 (ms) | Dropped starts |
+| :---------- | -----------: | -------------: | ------------: | ----------------: | --------------: | -------------: |
+| Mac         |        5,000 |       4,966.18 |         51.27 |             46.76 |            2.56 |          1,007 |
+| Mac         |        7,500 |       6,214.28 |         65.98 |             62.60 |            2.53 |         38,383 |
+| Mac         |       10,000 |       6,397.76 |         68.31 |             63.53 |            2.49 |        107,878 |
+| Colima      |        5,000 |       4,999.93 |         13.04 |              5.14 |            1.30 |              0 |
+
+Every issued request passed both benchmark checks. The host stages failed the
+zero-drop threshold and hit the 240-worker limit. The host run plateaued around
+6.4k requests/s as checkout slowed, while lookup p99 stayed near 2.5 ms. At the
+10k target, the median of six CPU samples was 58% for Fastify and 28% for
+Postgres, where 100% represents one CPU core.
+
+The 5k control shows that the result is sensitive to the setup. The Mac run
+moved k6 outside the VM and sent requests through Colima's published port. The
+control kept the whole request path inside the VM. The two runs vary both
+factors, so the throughput plateau describes the host setup as tested.
