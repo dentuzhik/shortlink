@@ -7,6 +7,7 @@ const rate = Number(__ENV.RATE);
 const seconds = Number(__ENV.SECONDS);
 const fixedVus = __ENV.BENCH_VUS ? Number(__ENV.BENCH_VUS) : undefined;
 const baseUrl = __ENV.BASE_URL ?? "http://redirect-service:3000";
+const fixtureLookup = __ENV.BENCH_LOOKUP === "fixture";
 
 if (!Number.isInteger(rate) || rate < 1 || rate > 20000) {
   throw new Error("RATE must be an integer from 1 to 20000");
@@ -64,6 +65,9 @@ export default function () {
     "302 with the expected Location": (res) =>
       res.status === 302 &&
       res.headers.Location === `https://example.com/benchmark/${code}`,
-    "database timings reported": () => timing !== null,
+    "timing matches the lookup mode": (res) =>
+      fixtureLookup
+        ? res.headers["Server-Timing"] === undefined
+        : timing !== null,
   });
 }

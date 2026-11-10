@@ -29,7 +29,7 @@ compose --parallel 1 up --build -d --wait --wait-timeout 60 redirect-service
 compose exec -T postgres sh -c 'exec psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   < benchmarks/seed.sql
 
-if [ "$host_runner" = 1 ]; then
+set_host_target() {
   address=$(compose port redirect-service 3000)
   case "$address" in
     127.0.0.1:[1-9]*) ;;
@@ -39,27 +39,41 @@ if [ "$host_runner" = 1 ]; then
   curl --fail --silent --show-error --noproxy '*' --retry 10 --retry-connrefused \
     --retry-delay 1 --connect-timeout 1 --max-time 2 "$benchmark_url/readyz" >/dev/null
   printf '\nHost k6 target: %s\n' "$benchmark_url"
-fi
+}
 
 stage() {
   if [ "$host_runner" = 1 ]; then
     K6_NO_USAGE_REPORT=true k6 run --quiet --no-color \
       -e RATE="$1" -e SECONDS="$2" -e BENCH_VUS="${BENCH_VUS:-}" \
-      -e BASE_URL="$benchmark_url" benchmarks/redirect.js
+      -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" benchmarks/redirect.js
   else
     compose run --rm --no-deps -T -e RATE="$1" -e SECONDS="$2" \
-      -e BENCH_VUS="${BENCH_VUS:-}" k6
+      -e BENCH_VUS="${BENCH_VUS:-}" -e BENCH_LOOKUP="$3" k6
   fi
 }
 
-printf '\nWarm-up: 20 requests/s for 3 seconds (not part of the baseline)\n'
-stage 20 3
-
 seconds=${BENCH_SECONDS:-10}
 status=0
-for rate in ${BENCH_RATES:-50 150 300}; do
-  printf '\n%s requests/s for %s seconds with pool max %s\n' \
-    "$rate" "$seconds" "${BENCH_POOL_MAX:-5}"
-  stage "$rate" "$seconds" || status=1
-done
+
+run_lookup() {
+  if [ "$host_runner" = 1 ]; then
+    set_host_target
+  fi
+  printf '\nWarm-up: 20 requests/s for 3 seconds (%s lookup)\n' "$1"
+  stage 20 3 "$1"
+
+  for rate in ${BENCH_RATES:-50 150 300}; do
+    printf '\n%s requests/s for %s seconds with pool max %s (%s lookup)\n' \
+      "$rate" "$seconds" "${BENCH_POOL_MAX:-5}" "$1"
+    stage "$rate" "$seconds" "$1" || status=1
+  done
+}
+
+run_lookup postgres
+if [ "${BENCH_FIXTURE_CONTROL:-0}" = 1 ]; then
+  compose exec -T redirect-service node --input-type=module < benchmarks/fixture-redirect.mjs
+  compose restart redirect-service
+  compose up -d --no-deps --no-recreate --wait --wait-timeout 60 redirect-service
+  run_lookup fixture
+fi
 exit "$status"

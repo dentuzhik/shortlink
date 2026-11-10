@@ -152,3 +152,29 @@ gain, and checkout p99 stayed in the same range. With ten connections, mean
 lookup time roughly doubled. That timing includes the driver, network round
 trip, and Node scheduling. The comparison measures the effect of pool size on
 this workload and leaves the source of the lookup slowdown open.
+
+## Postgres vs. an in-memory redirect fixture
+
+With k6 2.3.0 on `PATH`, run both lookups at 7,500 requests/s:
+
+```sh
+BENCH_HOST=1 BENCH_PORT=38175 BENCH_VUS=240 BENCH_POOL_MAX=5 \
+  BENCH_RATES=7500 BENCH_SECONDS=30 BENCH_FIXTURE_CONTROL=1 pnpm bench:redirect
+```
+
+Both stages used the same Fastify route, request logging, Colima port, and
+1,000 short codes. The runner measured Postgres first, then restarted Fastify
+with an in-memory map matching the seeded links. The fixture change applies to
+the compiled file in the disposable benchmark container. k6 checked the
+expected `302` and `Location` and verified the timing header for each mode.
+
+| Redirect lookup | Achieved req/s | HTTP p95 (ms) | HTTP p99 (ms) | Checkout p99 (ms) | Lookup p99 (ms) | Dropped starts |
+| :-------------- | -------------: | ------------: | ------------: | ----------------: | --------------: | -------------: |
+| Postgres        |       5,833.26 |         58.73 |         73.79 |             69.43 |            2.84 |         49,820 |
+| In-memory map   |       7,499.89 |          1.94 |          4.03 |                 — |               — |              0 |
+
+Every issued request passed both checks. The Postgres stage failed the
+zero-drop threshold. The fixture stage delivered the target rate through the
+same HTTP path. The comparison shows what bypassing the database lookup can
+save in this setup. A Redis cache would have its own network and lookup costs,
+and cache misses would still go to Postgres.
