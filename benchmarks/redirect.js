@@ -9,6 +9,8 @@ const fixedVus = __ENV.BENCH_VUS ? Number(__ENV.BENCH_VUS) : undefined;
 const baseUrl = __ENV.BASE_URL ?? "http://redirect-service:3000";
 const lookupMode = __ENV.BENCH_LOOKUP ?? "postgres";
 const redisLookup = lookupMode.startsWith("redis-");
+const hotLookup = lookupMode === "redis-hot";
+const expiresAtMs = Number(__ENV.BENCH_EXPIRES_AT_MS ?? 0);
 const fixtureCount = 1000;
 
 if (!Number.isInteger(rate) || rate < 1 || rate > 20000) {
@@ -20,6 +22,11 @@ if (!Number.isInteger(seconds) || seconds < 1 || seconds > 120) {
 if (fixedVus !== undefined && (!Number.isInteger(fixedVus) || fixedVus < 1)) {
   throw new Error("BENCH_VUS must be a positive integer");
 }
+if (expiresAtMs && (!hotLookup || seconds < 10)) {
+  throw new Error(
+    "Hot-key expiry requires a hot-key run of at least 10 seconds",
+  );
+}
 
 http.setResponseCallback(http.expectedStatuses(302));
 const poolAcquisition = new Trend("db_pool_acquire", true);
@@ -29,6 +36,9 @@ const postgresLookups = new Counter("postgres_lookups");
 const coldStartHitRate = new Rate("cold_first_3s_redis_hit_rate");
 const coldStartLookups = new Counter("cold_first_3s_postgres_lookups");
 const coldStartLatency = new Trend("cold_first_3s_http_duration", true);
+const expiryLookups = new Counter("hot_expiry_postgres_lookups");
+const expiryLatency = new Trend("hot_expiry_http_duration", true);
+const steadyLatency = new Trend("hot_steady_http_duration", true);
 
 export const options = {
   discardResponseBodies: true,
@@ -60,12 +70,16 @@ export const options = {
 };
 
 export default function () {
+  const startedAt = Date.now();
   const inColdStart =
-    lookupMode === "redis-cold" && Date.now() - exec.scenario.startTime < 3000;
+    lookupMode === "redis-cold" && startedAt - exec.scenario.startTime < 3000;
   // Match the 1,000 fixture codes in seed.sql and cycle through them evenly.
-  const code = String(
-    (exec.scenario.iterationInTest % fixtureCount) + 1,
-  ).padStart(8, "0");
+  const code = hotLookup
+    ? "00000001"
+    : String((exec.scenario.iterationInTest % fixtureCount) + 1).padStart(
+        8,
+        "0",
+      );
   const response = http.get(`${baseUrl}/${code}`, {
     redirects: 0,
     timeout: "2s",
@@ -92,6 +106,14 @@ export default function () {
       coldStartHitRate.add(hit);
       coldStartLookups.add(Number(usedPostgres));
       coldStartLatency.add(response.timings.duration);
+    }
+    if (expiresAtMs) {
+      if (Math.abs(startedAt - expiresAtMs) <= 500) {
+        expiryLookups.add(Number(usedPostgres));
+        expiryLatency.add(response.timings.duration);
+      } else {
+        steadyLatency.add(response.timings.duration);
+      }
     }
   }
 

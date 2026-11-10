@@ -4,10 +4,17 @@ set -efu
 project="shortlink-bench-$$"
 host_runner=${BENCH_HOST:-0}
 redis_runner=${BENCH_REDIS:-0}
+hot_key_runner=${BENCH_HOT_KEY:-0}
+expiry_at_ms=0
 unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 
 if [ "$host_runner" = 1 ] && ! command -v k6 >/dev/null 2>&1; then
   printf 'BENCH_HOST=1 requires k6 on PATH.\n' >&2
+  exit 1
+fi
+
+if [ "$hot_key_runner" = 1 ] && [ "$redis_runner" != 1 ]; then
+  printf 'BENCH_HOT_KEY=1 requires BENCH_REDIS=1.\n' >&2
   exit 1
 fi
 
@@ -60,10 +67,12 @@ stage() {
   if [ "$host_runner" = 1 ]; then
     K6_NO_USAGE_REPORT=true k6 run --quiet --no-color \
       -e RATE="$1" -e SECONDS="$2" -e BENCH_VUS="${BENCH_VUS:-}" \
-      -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" benchmarks/redirect.js
+      -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" \
+      -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" benchmarks/redirect.js
   else
     compose run --rm --no-deps -T -e RATE="$1" -e SECONDS="$2" \
-      -e BENCH_VUS="${BENCH_VUS:-}" -e BENCH_LOOKUP="$3" k6
+      -e BENCH_VUS="${BENCH_VUS:-}" -e BENCH_LOOKUP="$3" \
+      -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" k6
   fi
 }
 
@@ -92,9 +101,38 @@ redis_cli() {
   compose exec -T redis redis-cli -e "$@"
 }
 
+redis_stat() {
+  printf '%s\n' "$1" | awk -F: -v name="$2" '$1 == name { sub(/\r$/, "", $2); print $2 }'
+}
+
+measure_hot_key() {
+  hot_key=shortlink:redirect:00000001
+  stats_before=$(redis_cli INFO stats)
+  test "$(redis_cli PEXPIRE "$hot_key" 6000)" -eq 1
+  expiry_at_ms=$(redis_cli PEXPIRETIME "$hot_key")
+  printf '\nHot key expires at %s (Unix milliseconds)\n' "$expiry_at_ms"
+  measure "$1" redis-hot
+  expiry_at_ms=0
+
+  stats_after=$(redis_cli INFO stats)
+  expirations=$(( $(redis_stat "$stats_after" expired_keys) - $(redis_stat "$stats_before" expired_keys) ))
+  redis_misses=$(( $(redis_stat "$stats_after" keyspace_misses) - $(redis_stat "$stats_before" keyspace_misses) ))
+  printf 'Redis expirations: %s. Redis key misses: %s.\n' "$expirations" "$redis_misses"
+  test "$expirations" -eq 1 && test "$(redis_cli PTTL "$hot_key")" -gt 0
+}
+
 if [ "$redis_runner" = 1 ]; then
   if [ "$host_runner" = 1 ]; then
     set_host_target
+  fi
+  if [ "$hot_key_runner" = 1 ]; then
+    printf '\nWarm-up: 20 requests/s for 3 seconds (one hot key)\n'
+    stage 20 3 redis-hot
+    test "$(redis_cli DBSIZE)" -eq 1
+    for rate in ${BENCH_RATES:-50 150 300}; do
+      measure_hot_key "$rate"
+    done
+    exit "$status"
   fi
   printf '\nWarm-up: 20 requests/s for 3 seconds (Redis lookup)\n'
   stage 20 3 redis-warm

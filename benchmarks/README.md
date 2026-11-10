@@ -210,3 +210,29 @@ Of the 21,327 successful requests that started in the first three seconds of
 the cold stage, 20,299 hit Redis (95.17%). All 1,028 Postgres lookups occurred
 in that window, where HTTP p99 was 106.23 ms. The full-stage numbers mostly
 reflect a filled cache because the workload cycles through the same 1,000 codes.
+
+## Hot-key expiry at 7,500 requests/s
+
+With k6 2.3.0 on `PATH`, run three 15-second trials against one short code:
+
+```sh
+BENCH_REDIS=1 BENCH_HOT_KEY=1 BENCH_HOST=1 BENCH_PORT=38175 BENCH_VUS=240 \
+  BENCH_POOL_MAX=5 BENCH_RATES='7500 7500 7500' BENCH_SECONDS=15 pnpm bench:redirect
+```
+
+The runner warms `00000001` and sets its remaining TTL to six seconds just
+before each trial. All timed requests go to that code. The expiry window
+includes requests k6 started within 500 ms on either side of the deadline
+reported by Redis. Redis's own counters confirmed exactly one expiration per
+trial, and the runner checked that the key was present again afterward.
+
+| Trial | Achieved req/s | Redis misses | Postgres lookups | Expiry window p99 (ms) | Outside window p99 (ms) | Dropped starts |
+| ----: | -------------: | -----------: | ---------------: | ---------------------: | ----------------------: | -------------: |
+|     1 |       7,498.43 |           24 |               24 |                   7.68 |                    8.76 |              0 |
+|     2 |       7,494.14 |           19 |               19 |                  12.40 |                    8.04 |             78 |
+|     3 |       7,499.43 |           21 |               21 |                  11.38 |                    8.07 |              0 |
+
+Every issued request returned the expected redirect. All Postgres lookups
+occurred in the expiry window. One key expiration therefore caused 19 to 24
+queries for the same destination before the cache filled again. The p99 effect
+varied across trials. Dropped starts are counted for the full trial.
