@@ -50,3 +50,38 @@ checkouts with one connection. In that run k6 dropped two scheduled iterations
 with one connection, and every request it sent succeeded. The single-replica
 workload uses a small dataset and redirect reads, so this comparison measures
 pool behavior for that workload.
+
+## Postgres-only load probe
+
+Run the 30-second stages with the five-connection pool:
+
+```sh
+BENCH_POOL_MAX=5 BENCH_RATES='2000 3000 5000' BENCH_SECONDS=30 pnpm bench:redirect
+```
+
+The probe used Colima with 2 vCPUs and about 2 GiB of RAM. The three benchmark
+containers shared the VM with the local kind node and a separate development
+Postgres container. The default k6 scenario starts with 20 virtual users and
+can add up to a limit of 60. The two 5,000 requests/s reruns used fresh stacks
+and set both `preAllocatedVUs` and `maxVUs` to 60 and 120 respectively in
+temporary copies of the k6 script.
+
+| Target req/s | k6 workers (start / limit) | Achieved req/s | HTTP p95 (ms) | HTTP p99 (ms) | Checkout p99 (ms) | Dropped starts |
+| -----------: | :------------------------- | -------------: | ------------: | ------------: | ----------------: | -------------: |
+|        2,000 | 20 / 60                    |       1,999.92 |          0.52 |          1.48 |             0.027 |              2 |
+|        3,000 | 20 / 60                    |       2,995.15 |          0.79 |          2.26 |             0.045 |            145 |
+|        5,000 | 20 / 60                    |       4,990.51 |          2.15 |          5.43 |             1.710 |            279 |
+|        5,000 | 60 / 60                    |       4,986.91 |          2.93 |          7.89 |             3.480 |            392 |
+|        5,000 | 120 / 120                  |       4,999.37 |          2.39 |          6.48 |             1.730 |             18 |
+
+Every issued request returned the expected `302` and `Location`. All measured
+stages exceeded k6's zero-drop threshold. k6 reported reaching its worker limit
+in each 5,000 requests/s run. Starting with 120 workers reduced the number of
+skipped starts in the rerun, while p99 HTTP latency still exceeded 5 ms.
+
+In the 120-worker run, the median of six Docker CPU samples was 40% for k6,
+50% for Fastify, and 18% for Postgres, where 100% represents one CPU core.
+Checkout and HTTP tail latency both rose at 5,000 requests/s. The CPU snapshots
+can miss short spikes, and the checkout timer includes the time for Node to
+resume the waiting request. These measurements leave Postgres's capacity limit
+undetermined.
