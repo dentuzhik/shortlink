@@ -5,7 +5,17 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { Redis } from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import {
+  afterAll,
+  beforeAll,
+  describe,
+  expect,
+  onTestFinished,
+  test,
+  vi,
+} from "vitest";
 import type { buildApp as buildProductionApp } from "../../src/app.js";
 
 const run = promisify(execFile);
@@ -16,13 +26,14 @@ const { buildApp } = createRequire(import.meta.url)("../../dist/app.js") as {
 
 describe("links with Postgres", () => {
   let postgres: StartedPostgreSqlContainer | undefined;
+  let databaseUrl: string;
   let app: ReturnType<typeof buildApp>;
 
   beforeAll(async () => {
     postgres = await new PostgreSqlContainer("postgres:18.6")
       .withDatabase("shortener_test")
       .start();
-    const databaseUrl = postgres.getConnectionUri();
+    databaseUrl = postgres.getConnectionUri();
 
     // Run the same migration command as local development, on the test DB.
     await run("pnpm", ["--workspace-root", "run", "db:migrate"], {
@@ -112,6 +123,147 @@ describe("links with Postgres", () => {
     expect(response.json()).toMatchObject({
       data: null,
       errors: [{ extensions: { code: "BAD_USER_INPUT" } }],
+    });
+  });
+
+  describe("redirect cache with Redis", () => {
+    const targetUrl = "https://example.com/cached";
+    let container: StartedTestContainer | undefined;
+    let redis: Redis;
+    let redisUrl: string;
+    let cachedApp: ReturnType<typeof buildApp>;
+
+    beforeAll(async () => {
+      container = await new GenericContainer("redis:8.10.3-alpine")
+        .withExposedPorts(6379)
+        .start();
+      redisUrl = `redis://${container.getHost()}:${container.getMappedPort(6379)}`;
+      redis = new Redis(redisUrl, { lazyConnect: true, commandTimeout: 3000 });
+      await redis.connect();
+      cachedApp = buildApp(databaseUrl, {
+        redisUrl,
+        reportCacheHit: true,
+        reportPoolWait: true,
+      });
+      cachedApp.log.level = "silent";
+
+      // The app can serve from Postgres while its Redis connection opens.
+      await redis.set("shortlink:redirect:cache-ready", targetUrl, "EX", 60);
+      await vi.waitFor(async () => {
+        const response = await cachedApp.inject("/cache-ready");
+        expect(response.headers["x-cache"]).toBe("HIT");
+      });
+      await redis.del("shortlink:redirect:cache-ready");
+    }, 120_000);
+
+    afterAll(async () => {
+      try {
+        await cachedApp?.close();
+      } finally {
+        redis?.disconnect();
+        await container?.stop();
+      }
+    }, 30_000);
+
+    async function createLink() {
+      const response = await cachedApp.inject({
+        method: "POST",
+        url: "/links",
+        payload: { targetUrl },
+      });
+      expect(response.statusCode).toBe(201);
+      return response.json<{ code: string }>().code;
+    }
+
+    test("fills Redis on a miss and returns a hit on the next visit", async () => {
+      const code = await createLink();
+      const key = `shortlink:redirect:${code}`;
+      expect(await redis.get(key)).toBeNull();
+
+      const miss = await cachedApp.inject(`/${code}`);
+      expect(miss.statusCode).toBe(302);
+      expect(miss.headers.location).toBe(targetUrl);
+      expect(miss.headers["x-cache"]).toBeUndefined();
+      expect(miss.headers["server-timing"]).toContain("db_lookup");
+      expect(await redis.get(key)).toBe(targetUrl);
+      const ttl = await redis.ttl(key);
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(60);
+
+      const hit = await cachedApp.inject(`/${code}`);
+      expect(hit.statusCode).toBe(302);
+      expect(hit.headers.location).toBe(targetUrl);
+      expect(hit.headers["x-cache"]).toBe("HIT");
+      expect(hit.headers["cache-control"]).toBe("no-store");
+      expect(hit.headers["server-timing"]).toBeUndefined();
+    });
+
+    test("returns 404 without caching a missing code", async () => {
+      const code = "redis-missing";
+      const response = await cachedApp.inject(`/${code}`);
+
+      expect(response.statusCode).toBe(404);
+      expect(response.headers["x-cache"]).toBeUndefined();
+      expect(await redis.get(`shortlink:redirect:${code}`)).toBeNull();
+    });
+
+    test("uses Postgres when a Redis read times out", async () => {
+      const code = await createLink();
+      await redis.set(`shortlink:redirect:${code}`, targetUrl, "EX", 60);
+      expect((await cachedApp.inject(`/${code}`)).headers["x-cache"]).toBe(
+        "HIT",
+      );
+
+      await redis.call("CLIENT", "PAUSE", "1000", "ALL");
+      try {
+        const response = await cachedApp.inject(`/${code}`);
+
+        expect(response.statusCode).toBe(302);
+        expect(response.headers.location).toBe(targetUrl);
+        expect(response.headers["x-cache"]).toBeUndefined();
+        expect(response.headers["server-timing"]).toContain("db_lookup");
+      } finally {
+        await redis.call("CLIENT", "UNPAUSE");
+      }
+    });
+
+    test("returns the redirect when a Redis cache fill times out", async () => {
+      const code = await createLink();
+      const key = `shortlink:redirect:${code}`;
+
+      await redis.call("CLIENT", "PAUSE", "1000", "WRITE");
+      try {
+        const response = await cachedApp.inject(`/${code}`);
+
+        expect(response.statusCode).toBe(302);
+        expect(response.headers.location).toBe(targetUrl);
+        expect(response.headers["x-cache"]).toBeUndefined();
+        expect(response.headers["server-timing"]).toContain("db_lookup");
+        expect(await redis.get(key)).toBeNull();
+      } finally {
+        await redis.call("CLIENT", "UNPAUSE");
+      }
+    });
+
+    test("keeps the cache hit header disabled by default", async () => {
+      const appWithoutHeader = buildApp(databaseUrl, {
+        redisUrl,
+        reportPoolWait: true,
+      });
+      appWithoutHeader.log.level = "silent";
+      onTestFinished(() => appWithoutHeader.close());
+      const code = await createLink();
+      await redis.set(`shortlink:redirect:${code}`, targetUrl, "EX", 60);
+
+      await expect
+        .poll(async () => {
+          const response = await appWithoutHeader.inject(`/${code}`);
+          expect(response.statusCode).toBe(302);
+          expect(response.headers.location).toBe(targetUrl);
+          expect(response.headers["x-cache"]).toBeUndefined();
+          return response.headers["server-timing"];
+        })
+        .toBeUndefined();
     });
   });
 });

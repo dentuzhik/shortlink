@@ -4,6 +4,8 @@ import { readDatabaseUrl } from "./database.js";
 const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   poolMax: Number(process.env.DB_POOL_MAX ?? 5),
   reportPoolWait: process.env.DB_POOL_TIMING === "1",
+  redisUrl: process.env.REDIS_URL ?? "",
+  reportCacheHit: process.env.REDIS_CACHE_HEADER === "1",
 });
 
 async function shutdown(signal: string) {

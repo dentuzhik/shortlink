@@ -30,6 +30,10 @@ services:
       retries: 15
       start_period: 5s
 
+  redis:
+    image: redis:8.10.3-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
   migrate:
     <<: *redirect-image
     command: ["pnpm", "db:migrate"]
@@ -45,6 +49,8 @@ services:
     environment:
       <<: *postgres-env
       POSTGRES_HOST: postgres
+      REDIS_URL: ${REDIS_URL-redis://redis:6379}
+      REDIS_CACHE_HEADER: ${REDIS_CACHE_HEADER:-0}
     ports:
       - "127.0.0.1:3100:3000"
     depends_on:

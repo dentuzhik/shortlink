@@ -28,6 +28,14 @@ forwards `/graphql` to `redirect-service:3000`. The browser sees host ports;
 containers talk to each other by service name. The same service names are used
 in Kubernetes, so the built images work in both places.
 
+The Compose stack gives Fastify a Redis cache at `redis://redis:6379`.
+Successful redirect lookups are cached for 60 seconds. If a Redis read fails,
+Fastify looks up the destination in Postgres. Redis is reached through the
+Compose network. Set `REDIS_CACHE_HEADER=1` when running `pnpm stack:up` to see
+`X-Cache: HIT` on redirects served from Redis. For example, run
+`curl -i http://127.0.0.1:3100/<code>` twice with a valid short code. Set
+`REDIS_URL` to an empty value to disable caching in Compose.
+
 ## Run in local Kubernetes
 
 With Colima running and `kind` and `kubectl` installed, run:
@@ -198,10 +206,10 @@ The route tests call Fastify's `inject()` with fake link queries, so they
 need neither a listening server nor Postgres. They verify the HTTP behavior and
 retry policy.
 
-`pnpm test:integration` uses Testcontainers to start a fresh Postgres container,
-run `db:migrate` against it, and verify that codes created via REST and GraphQL redirect. It closes
-Fastify and stops the container when finished. It uses a separate database and
-does not need `pnpm db:up` or a running HTTP server.
+`pnpm test:integration` uses Testcontainers to start fresh Postgres and Redis
+containers. It runs `db:migrate`, verifies redirects for codes created via REST
+and GraphQL, and checks cache hits, expiry configuration, and Redis timeouts.
+It closes Fastify and stops both containers when finished.
 
 On Colima, start the VM and run the same command:
 

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 // Run inside the disposable benchmark container, after the Postgres run.
 const appPath = "/app/apps/redirect-service/dist/app.js";
 const registration =
-  "registerRedirectRoute(app, linkStore.findTargetUrl, reportPoolWait);";
+  "registerRedirectRoute(app, findTargetUrl, reportPoolWait, reportCacheHit);";
 const appSource = readFileSync(appPath, "utf8");
 
 if (appSource.split(registration).length !== 2) {

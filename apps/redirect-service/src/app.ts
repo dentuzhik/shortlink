@@ -5,16 +5,26 @@ import { registerGraphQL } from "./graphql.js";
 import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
 import { registerRedirectRoute } from "./redirect.js";
+import { createRedirectCache } from "./redirect-cache.js";
 
 export function buildApp(
   databaseUrl: string,
-  { poolMax = 5, reportPoolWait = false } = {},
+  {
+    poolMax = 5,
+    reportPoolWait = false,
+    redisUrl = "",
+    reportCacheHit = false,
+  } = {},
 ) {
   const app = Fastify({
     logger: true,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   const pool = createDatabasePool(databaseUrl, poolMax);
+  const linkStore = createLinkStore(pool);
+  const cache = redisUrl
+    ? createRedirectCache(redisUrl, linkStore.findTargetUrl, app.log)
+    : undefined;
 
   pool.on("error", (error) => {
     // Pool errors can include the database client. Log only the message.
@@ -22,6 +32,7 @@ export function buildApp(
   });
 
   app.addHook("onClose", async () => {
+    cache?.close();
     await pool.end();
   });
 
@@ -40,10 +51,10 @@ export function buildApp(
     }
   });
 
-  const linkStore = createLinkStore(pool);
   registerLinkRoutes(app, linkStore);
   registerGraphQL(app, createLinkCreator(linkStore));
-  registerRedirectRoute(app, linkStore.findTargetUrl, reportPoolWait);
+  const findTargetUrl = cache?.findTargetUrl ?? linkStore.findTargetUrl;
+  registerRedirectRoute(app, findTargetUrl, reportPoolWait, reportCacheHit);
 
   return app;
 }

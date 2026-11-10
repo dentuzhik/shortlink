@@ -1,12 +1,16 @@
 import type { FastifyInstance } from "fastify";
 
+export type RedirectLookup = (
+  code: string,
+  onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
+  onCacheHit?: () => void,
+) => Promise<string | undefined>;
+
 export function registerRedirectRoute(
   app: FastifyInstance,
-  findTargetUrl: (
-    code: string,
-    onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
-  ) => Promise<string | undefined>,
+  findTargetUrl: RedirectLookup,
   reportPoolWait = false,
+  reportCacheHit = false,
 ) {
   app.get<{ Params: { code: string } }>("/:code", async (request, reply) => {
     // A cached 404 could also hide a link that is created later.
@@ -14,14 +18,23 @@ export function registerRedirectRoute(
 
     try {
       const { code } = request.params;
-      const targetUrl = reportPoolWait
-        ? await findTargetUrl(code, (checkoutMs, lookupMs) => {
+      const onDatabaseTiming = reportPoolWait
+        ? (checkoutMs: number, lookupMs: number) => {
             reply.header(
               "Server-Timing",
               `db_pool;dur=${checkoutMs.toFixed(3)}, db_lookup;dur=${lookupMs.toFixed(3)}`,
             );
-          })
-        : await findTargetUrl(code);
+          }
+        : undefined;
+      const onCacheHit = reportCacheHit
+        ? () => {
+            reply.header("X-Cache", "HIT");
+          }
+        : undefined;
+      const targetUrl =
+        onDatabaseTiming || onCacheHit
+          ? await findTargetUrl(code, onDatabaseTiming, onCacheHit)
+          : await findTargetUrl(code);
       if (targetUrl === undefined) {
         return reply.code(404).send({ error: "Link not found" });
       }
