@@ -30,11 +30,11 @@ in Kubernetes, so the built images work in both places.
 
 The Compose stack gives Fastify a Redis cache at `redis://redis:6379`.
 Successful redirect lookups are cached for 60 seconds. If a Redis read fails,
-Fastify looks up the destination in Postgres. Redis is reached through the
-Compose network. Set `REDIS_CACHE_HEADER=1` when running `pnpm stack:up` to see
-`X-Cache: HIT` on redirects served from Redis. For example, run
-`curl -i http://127.0.0.1:3100/<code>` twice with a valid short code. Set
-`REDIS_URL` to an empty value to disable caching in Compose.
+Fastify looks up the destination in Postgres. Concurrent Redis misses for the
+same code share one Postgres lookup and cache fill within each Fastify process.
+Set `REDIS_CACHE_HEADER=1` when running `pnpm stack:up` to see `X-Cache: HIT`
+on a Redis hit or `X-Cache: COALESCED` on a redirect that waited for another
+request's lookup. Set `REDIS_URL` to an empty value to disable caching in Compose.
 
 ## Run in local Kubernetes
 

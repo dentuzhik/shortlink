@@ -5,7 +5,9 @@ project="shortlink-bench-$$"
 host_runner=${BENCH_HOST:-0}
 redis_runner=${BENCH_REDIS:-0}
 hot_key_runner=${BENCH_HOT_KEY:-0}
+spike_runner=${BENCH_HOT_SPIKE:-0}
 expiry_at_ms=0
+spike_at_ms=0
 unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
 
 if [ "$host_runner" = 1 ] && ! command -v k6 >/dev/null 2>&1; then
@@ -15,6 +17,11 @@ fi
 
 if [ "$hot_key_runner" = 1 ] && [ "$redis_runner" != 1 ]; then
   printf 'BENCH_HOT_KEY=1 requires BENCH_REDIS=1.\n' >&2
+  exit 1
+fi
+
+if [ "$spike_runner" = 1 ] && { [ "$hot_key_runner" != 1 ] || [ "$host_runner" != 1 ]; }; then
+  printf 'BENCH_HOT_SPIKE=1 requires BENCH_REDIS=1 BENCH_HOT_KEY=1 BENCH_HOST=1.\n' >&2
   exit 1
 fi
 
@@ -68,7 +75,8 @@ stage() {
     K6_NO_USAGE_REPORT=true k6 run --quiet --no-color \
       -e RATE="$1" -e SECONDS="$2" -e BENCH_VUS="${BENCH_VUS:-}" \
       -e BASE_URL="$benchmark_url" -e BENCH_LOOKUP="$3" \
-      -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" benchmarks/redirect.js
+      -e BENCH_EXPIRES_AT_MS="$expiry_at_ms" -e BENCH_SPIKE_AT_MS="$spike_at_ms" \
+      benchmarks/redirect.js
   else
     compose run --rm --no-deps -T -e RATE="$1" -e SECONDS="$2" \
       -e BENCH_VUS="${BENCH_VUS:-}" -e BENCH_LOOKUP="$3" \
@@ -121,6 +129,33 @@ measure_hot_key() {
   test "$expirations" -eq 1 && test "$(redis_cli PTTL "$hot_key")" -gt 0
 }
 
+measure_hot_spike() {
+  hot_key=shortlink:redirect:00000001
+  stats_before=$(redis_cli INFO stats)
+  ttl_ms=8000
+  expected_expirations=1
+  if [ "$1" = warm ]; then
+    ttl_ms=60000
+    expected_expirations=0
+  fi
+  test "$(redis_cli PEXPIRE "$hot_key" "$ttl_ms")" -eq 1
+  deadline=$(redis_cli PEXPIRETIME "$hot_key")
+  spike_at_ms=$(( deadline - ttl_ms + 8000 ))
+  printf '\nHot spike (%s): 7,500 → 20,000 → 7,500 requests/s. Boundary: %s ms.\n' "$1" "$spike_at_ms"
+  stage 20000 3 redis-hot || status=1
+  spike_at_ms=0
+
+  stats_after=$(redis_cli INFO stats)
+  expirations=$(( $(redis_stat "$stats_after" expired_keys) - $(redis_stat "$stats_before" expired_keys) ))
+  redis_misses=$(( $(redis_stat "$stats_after" keyspace_misses) - $(redis_stat "$stats_before" keyspace_misses) ))
+  printf 'Redis expirations: %s. Redis key misses: %s.\n' "$expirations" "$redis_misses"
+  test "$expirations" -eq "$expected_expirations"
+  if [ "$1" = warm ]; then
+    test "$redis_misses" -eq 0
+  fi
+  test "$(redis_cli PTTL "$hot_key")" -gt 0
+}
+
 if [ "$redis_runner" = 1 ]; then
   if [ "$host_runner" = 1 ]; then
     set_host_target
@@ -129,6 +164,12 @@ if [ "$redis_runner" = 1 ]; then
     printf '\nWarm-up: 20 requests/s for 3 seconds (one hot key)\n'
     stage 20 3 redis-hot
     test "$(redis_cli DBSIZE)" -eq 1
+    if [ "$spike_runner" = 1 ]; then
+      for cache_case in warm expiry expiry warm; do
+        measure_hot_spike "$cache_case"
+      done
+      exit "$status"
+    fi
     for rate in ${BENCH_RATES:-50 150 300}; do
       measure_hot_key "$rate"
     done

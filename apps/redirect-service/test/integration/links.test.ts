@@ -6,6 +6,7 @@ import {
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
 import { Redis } from "ioredis";
+import { Client } from "pg";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import {
   afterAll,
@@ -196,6 +197,55 @@ describe("links with Postgres", () => {
       expect(hit.headers["x-cache"]).toBe("HIT");
       expect(hit.headers["cache-control"]).toBe("no-store");
       expect(hit.headers["server-timing"]).toBeUndefined();
+    });
+
+    test("shares one Postgres lookup across concurrent misses for the same code", async () => {
+      const code = await createLink();
+      const readRedisMisses = async () =>
+        Number(
+          /^keyspace_misses:(\d+)\r?$/m.exec(await redis.info("stats"))?.[1],
+        );
+      const requestCount = 6;
+      const locker = new Client({ connectionString: databaseUrl });
+      await locker.connect();
+
+      try {
+        // Hold up the first lookup until every request has missed Redis.
+        await locker.query("BEGIN");
+        await locker.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+        const missesBefore = await readRedisMisses();
+        const redirects = Promise.all(
+          Array.from({ length: requestCount }, () =>
+            cachedApp.inject(`/${code}`),
+          ),
+        );
+        try {
+          await expect.poll(readRedisMisses).toBe(missesBefore + requestCount);
+        } finally {
+          await locker.query("ROLLBACK");
+        }
+
+        const responses = await redirects;
+        for (const response of responses) {
+          expect(response.statusCode).toBe(302);
+          expect(response.headers.location).toBe(targetUrl);
+          expect(response.headers["cache-control"]).toBe("no-store");
+        }
+        const leaders = responses.filter((r) => r.headers["server-timing"]);
+        expect(leaders).toHaveLength(1);
+        expect(leaders[0]?.headers["server-timing"]).toContain("db_lookup");
+        expect(leaders[0]?.headers["x-cache"]).toBeUndefined();
+        const followers = responses.filter((r) => !r.headers["server-timing"]);
+        expect(followers).toHaveLength(requestCount - 1);
+        for (const follower of followers) {
+          expect(follower.headers["x-cache"]).toBe("COALESCED");
+        }
+        expect((await cachedApp.inject(`/${code}`)).headers["x-cache"]).toBe(
+          "HIT",
+        );
+      } finally {
+        await locker.end();
+      }
     });
 
     test("returns 404 without caching a missing code", async () => {

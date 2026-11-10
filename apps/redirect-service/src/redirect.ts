@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 
+export type RedirectCacheSource = "HIT" | "COALESCED";
+
 export type RedirectLookup = (
   code: string,
   onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
-  onCacheHit?: () => void,
+  onCacheSource?: (source: RedirectCacheSource) => void,
 ) => Promise<string | undefined>;
 
 export function registerRedirectRoute(
@@ -26,14 +28,14 @@ export function registerRedirectRoute(
             );
           }
         : undefined;
-      const onCacheHit = reportCacheHit
-        ? () => {
-            reply.header("X-Cache", "HIT");
+      const onCacheSource = reportCacheHit
+        ? (source: RedirectCacheSource) => {
+            reply.header("X-Cache", source);
           }
         : undefined;
       const targetUrl =
-        onDatabaseTiming || onCacheHit
-          ? await findTargetUrl(code, onDatabaseTiming, onCacheHit)
+        onDatabaseTiming || onCacheSource
+          ? await findTargetUrl(code, onDatabaseTiming, onCacheSource)
           : await findTargetUrl(code);
       if (targetUrl === undefined) {
         return reply.code(404).send({ error: "Link not found" });

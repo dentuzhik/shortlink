@@ -236,3 +236,82 @@ Every issued request returned the expected redirect. All Postgres lookups
 occurred in the expiry window. One key expiration therefore caused 19 to 24
 queries for the same destination before the cache filled again. The p99 effect
 varied across trials. Dropped starts are counted for the full trial.
+
+### After request coalescing
+
+Repeating the same command with one Fastify process produced these results:
+
+| Trial | Achieved req/s | Redis misses | Coalesced redirects | Postgres lookups | Expiry window p99 (ms) | Outside window p99 (ms) | Dropped starts |
+| ----: | -------------: | -----------: | ------------------: | ---------------: | ---------------------: | ----------------------: | -------------: |
+|     1 |       7,498.54 |           10 |                   9 |                1 |                   5.30 |                    9.25 |              0 |
+|     2 |       7,498.93 |           39 |                  38 |                1 |                   3.59 |                    4.72 |              0 |
+|     3 |       7,499.15 |            8 |                   7 |                1 |                   7.12 |                    4.68 |              0 |
+
+Every issued request returned the expected redirect. Each trial had one Redis
+expiration and one Postgres lookup in the expiry window. The other Redis misses
+waited for that lookup and are counted separately from Redis hits. This shows
+the reduction in database work for one hot key on one Fastify process. The
+latency numbers varied between trials, including outside the expiry window.
+
+## Hot-key expiry during a 20,000 requests/s spike
+
+With k6 2.3.0 on `PATH`, run:
+
+```sh
+BENCH_REDIS=1 BENCH_HOT_KEY=1 BENCH_HOT_SPIKE=1 BENCH_HOST=1 \
+  BENCH_PORT=38175 BENCH_VUS=800 BENCH_POOL_MAX=5 pnpm bench:redirect
+```
+
+One continuous k6 scenario reuses its worker pool across three 3-second phases:
+7,500 requests/s, 20,000 requests/s, and 7,500 requests/s. All redirect traffic
+goes to one code. A separate scenario probes `/healthz` at 50 requests/s. k6
+tags requests by their actual start time so the spike latency is reported
+separately from baseline and recovery.
+
+The trial order is warm, expiry, expiry, warm. In the expiry trials Redis is
+scheduled to expire the key about 100 ms after the spike begins; the warm trials
+use the same measurement boundary and keep the key cached. The runner verifies
+the expiration count and that the key is present afterward. k6 reports the
+first 100 ms after the boundary separately, and checks for dropped starts,
+incorrect responses, and whether close to 60,000 requests started in the spike.
+
+The Mac drove the benchmark through Colima's published loopback port, with
+one Fastify process, Redis, and Postgres in the 2-vCPU, 2-GiB VM. Dropped
+starts below are across the whole trial. Postgres counts come from successful
+redirects that reported a lookup in `Server-Timing`.
+
+| Trial (800 workers) | Spike requests | Spike failures | Dropped starts | Spike p99 (ms) | First 100 ms p99 (ms) | `/healthz` spike p99 (ms) | Postgres lookups | Coalesced redirects |
+| :------------------ | -------------: | -------------: | -------------: | -------------: | --------------------: | ------------------------: | ---------------: | ------------------: |
+| Warm 1              |         55,769 |              0 |          4,239 |          56.70 |                 22.10 |                     45.28 |              100 |                   0 |
+| Expiry 1            |         57,857 |              0 |          2,079 |          70.46 |                 22.86 |                     57.67 |                1 |                 131 |
+| Expiry 2            |         52,657 |             28 |          7,103 |          85.98 |                 22.62 |                     64.30 |              306 |                 267 |
+| Warm 2              |         56,122 |              0 |          3,559 |          83.30 |                 15.20 |                     63.45 |              194 |                   0 |
+
+The first 100 ms contained 1,962 to 2,000 starts in each trial. The expiry
+trials had 132 and 268 Redis misses, respectively, with one fewer coalesced
+redirect in each. All health probes succeeded with 800 workers.
+
+Repeating with `BENCH_VUS=1600` still fell short. The table separates
+transport failures from HTTP 5xx responses during the spike. Health failures
+are counted across all 450 probes per trial.
+
+| Trial (1,600 workers) | Spike requests | Dropped starts | Transport failures | HTTP 5xx | Health failures | Spike p99 (ms) | First 100 ms p99 (ms) | Postgres lookups | Coalesced redirects |
+| :-------------------- | -------------: | -------------: | -----------------: | -------: | --------------: | -------------: | --------------------: | ---------------: | ------------------: |
+| Warm 1                |         54,722 |          4,959 |                596 |        0 |              51 |          89.85 |                 35.97 |              223 |                   0 |
+| Expiry 1              |         56,235 |          3,239 |                597 |        0 |              46 |          81.38 |                 26.60 |              263 |                 111 |
+| Expiry 2              |         56,374 |          3,042 |                597 |        0 |              45 |          72.32 |                 69.54 |              111 |                 857 |
+| Warm 2                |         55,950 |          3,609 |                598 |        1 |              46 |          83.50 |                 34.02 |              118 |                   0 |
+
+Redis recorded one expiration in each expiry trial, roughly 100 ms into the
+spike. There were 112 and 858 Redis misses, respectively. All but one miss in
+each trial had a matching coalesced redirect. Client starts for those redirects
+were within 31 ms of the scheduled expiry. Their HTTP p99 was 16.70 ms and
+81.65 ms, respectively. In the slower trial, k6 started only 1,395 requests in
+the first 100 ms after the boundary; the other three trials started 2,000 each.
+
+Every measured trial fell short of the 60,000 starts expected during the spike.
+Even the warm controls had Postgres lookups despite zero Redis misses. The app
+falls back to Postgres when a Redis read fails, and this path bypasses
+coalescing. These runs verify that requests shared the cache refill during the
+spike, but the warm controls also degraded, so the test cannot isolate a
+capacity limit or establish that expiry has no latency cost.

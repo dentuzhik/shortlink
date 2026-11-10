@@ -15,6 +15,7 @@ export function createRedirectCache(
     enableOfflineQueue: false,
     autoResendUnfulfilledCommands: false,
   });
+  const pendingFills = new Map<string, Promise<string | undefined>>();
 
   redis.on("error", (error) => {
     log.warn({ errorType: error.name }, "Redis connection error");
@@ -23,7 +24,7 @@ export function createRedirectCache(
   const findTargetUrl: RedirectLookup = async (
     code,
     onDatabaseTiming,
-    onCacheHit,
+    onCacheSource,
   ) => {
     const key = `shortlink:redirect:${code}`;
     let cachedUrl: string | null;
@@ -39,23 +40,41 @@ export function createRedirectCache(
     }
 
     if (cachedUrl !== null) {
-      onCacheHit?.();
+      onCacheSource?.("HIT");
       return cachedUrl;
     }
 
-    const targetUrl = await findInPostgres(code, onDatabaseTiming);
-    if (targetUrl !== undefined) {
-      try {
-        await redis.set(key, targetUrl, "EX", ttlSeconds);
-      } catch (error) {
-        log.debug(
-          { errorType: error instanceof Error ? error.name : "unknown" },
-          "Redis redirect cache fill failed",
-        );
+    const existingFill = pendingFills.get(code);
+    if (existingFill) {
+      const targetUrl = await existingFill;
+      if (targetUrl !== undefined) {
+        onCacheSource?.("COALESCED");
       }
+      return targetUrl;
     }
 
-    return targetUrl;
+    // Keep sharing the lookup while Redis is still being filled.
+    const fill = (async () => {
+      const targetUrl = await findInPostgres(code, onDatabaseTiming);
+      if (targetUrl !== undefined) {
+        try {
+          await redis.set(key, targetUrl, "EX", ttlSeconds);
+        } catch (error) {
+          log.debug(
+            { errorType: error instanceof Error ? error.name : "unknown" },
+            "Redis redirect cache fill failed",
+          );
+        }
+      }
+      return targetUrl;
+    })();
+    pendingFills.set(code, fill);
+
+    try {
+      return await fill;
+    } finally {
+      pendingFills.delete(code);
+    }
   };
 
   return { findTargetUrl, close: () => redis.disconnect() };
