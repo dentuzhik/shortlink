@@ -32,6 +32,12 @@ const redirectSuccess = new Rate("redirect_success");
 const measuredRedirects = new Counter("measured_redirects");
 const createSuccess = new Rate("link_creation_success");
 const redirectElapsed = new Trend("redirect_elapsed", true);
+const successfulRedirectElapsed = new Trend(
+  "successful_redirect_elapsed",
+  true,
+);
+const overloadResponses = new Counter("redirect_overload_responses");
+const overloadElapsed = new Trend("redirect_overload_elapsed", true);
 const createElapsed = new Trend("link_creation_elapsed", true);
 const poolAcquisition = new Trend("db_pool_acquire", true);
 const databaseLookup = new Trend("db_lookup", true);
@@ -121,11 +127,16 @@ export function visit() {
     response.headers.Location === `https://example.com/benchmark/${code}`;
   redirectElapsed.add(elapsedMs);
   redirectSuccess.add(correct);
+  if (response.status === 503) {
+    overloadResponses.add(1);
+    overloadElapsed.add(elapsedMs);
+  }
   for (const { ms, good } of cutoffs) {
     good.add(correct && elapsedMs <= ms);
   }
 
   if (correct) {
+    successfulRedirectElapsed.add(elapsedMs);
     const serverTiming = response.headers["Server-Timing"];
     const timing = /^db_pool;dur=(\d+\.\d+), db_lookup;dur=(\d+\.\d+)$/.exec(
       serverTiming ?? "",

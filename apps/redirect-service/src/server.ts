@@ -6,6 +6,10 @@ const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   reportPoolWait: process.env.DB_POOL_TIMING === "1",
   redisUrl: process.env.REDIS_URL ?? "",
   reportCacheHit: process.env.REDIS_CACHE_HEADER === "1",
+  redirectMaxWaiters: Number(process.env.REDIRECT_DB_MAX_WAITERS ?? 128),
+  redirectCheckoutTimeoutMs: Number(
+    process.env.REDIRECT_DB_CHECKOUT_TIMEOUT_MS ?? 50,
+  ),
 });
 
 async function shutdown(signal: string) {

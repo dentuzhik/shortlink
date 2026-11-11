@@ -147,6 +147,8 @@ describe("links with Postgres", () => {
         redisUrl,
         reportCacheHit: true,
         reportPoolWait: true,
+        // These tests deliberately hold database locks while observing overlap.
+        redirectCheckoutTimeoutMs: 400,
       });
       cachedApp.log.level = "silent";
 
@@ -178,6 +180,12 @@ describe("links with Postgres", () => {
       return response.json<{ code: string }>().code;
     }
 
+    async function readRedisMisses() {
+      return Number(
+        /^keyspace_misses:(\d+)\r?$/m.exec(await redis.info("stats"))?.[1],
+      );
+    }
+
     test("fills Redis on a miss and returns a hit on the next visit", async () => {
       const code = await createLink();
       const key = `shortlink:redirect:${code}`;
@@ -203,10 +211,6 @@ describe("links with Postgres", () => {
 
     test("shares one Postgres lookup across concurrent misses for the same code", async () => {
       const code = await createLink();
-      const readRedisMisses = async () =>
-        Number(
-          /^keyspace_misses:(\d+)\r?$/m.exec(await redis.info("stats"))?.[1],
-        );
       const requestCount = 6;
       const locker = new Client({ connectionString: databaseUrl });
       await locker.connect();
@@ -387,6 +391,108 @@ describe("links with Postgres", () => {
       } finally {
         debug.mockRestore();
         await locker.end();
+      }
+    });
+
+    test("sheds new Postgres lookups when the redirect queue fills or expires", async () => {
+      const guardedApp = buildApp(databaseUrl, {
+        poolMax: 1,
+        redisUrl,
+        reportCacheHit: true,
+        redirectMaxWaiters: 1,
+        redirectCheckoutTimeoutMs: 150,
+      });
+      guardedApp.log.level = "silent";
+      onTestFinished(() => guardedApp.close());
+
+      const [activeCode, queuedCode, overflowCode] = await Promise.all([
+        createLink(),
+        createLink(),
+        createLink(),
+      ]);
+      await redis.set("shortlink:redirect:guard-hit", targetUrl, "EX", 60);
+      await vi.waitFor(async () => {
+        expect((await guardedApp.inject("/guard-hit")).headers["x-cache"]).toBe(
+          "HIT",
+        );
+      });
+
+      const locker = new Client({ connectionString: databaseUrl });
+      await locker.connect();
+      try {
+        await locker.query("BEGIN");
+        await locker.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+        const active = guardedApp
+          .inject(`/${activeCode}`)
+          .then((response) => response);
+        await vi.waitFor(
+          async () => {
+            const { rows } = await locker.query<{ blocked: number }>(`
+            SELECT count(*)::int AS blocked
+            FROM pg_locks
+            WHERE relation = 'links'::regclass
+              AND mode = 'AccessShareLock'
+              AND NOT granted
+          `);
+            expect(rows[0]?.blocked).toBe(1);
+          },
+          { interval: 5, timeout: 150 },
+        );
+
+        const missesBefore = await readRedisMisses();
+        const queued = guardedApp
+          .inject(`/${queuedCode}`)
+          .then((response) => response);
+        await expect
+          .poll(readRedisMisses, { interval: 5, timeout: 75 })
+          .toBe(missesBefore + 1);
+
+        const overflow = await Promise.race([
+          guardedApp.inject(`/${overflowCode}`),
+          queued.then(() => undefined),
+        ]);
+        expect(overflow?.statusCode).toBe(503);
+        expect(overflow?.headers["cache-control"]).toBe("no-store");
+        expect(overflow?.json()).toEqual({
+          error: "Redirect temporarily unavailable",
+        });
+
+        const [hit, expired] = await Promise.all([
+          guardedApp.inject("/guard-hit"),
+          queued,
+        ]);
+        expect(hit.statusCode).toBe(302);
+        expect(hit.headers["x-cache"]).toBe("HIT");
+        expect(expired.statusCode).toBe(503);
+        expect(expired.headers["cache-control"]).toBe("no-store");
+
+        // A follower can still join the active lookup. A write can use the
+        // connection once the expired checkout releases it.
+        const shared = guardedApp
+          .inject(`/${activeCode}`)
+          .then((response) => response);
+        await expect
+          .poll(readRedisMisses, { interval: 5, timeout: 75 })
+          .toBe(missesBefore + 3);
+        const created = guardedApp.inject({
+          method: "POST",
+          url: "/links",
+          payload: { targetUrl },
+        });
+        await locker.query("ROLLBACK");
+        const [redirect, coalesced, write] = await Promise.all([
+          active,
+          shared,
+          created,
+        ]);
+        expect(redirect.statusCode).toBe(302);
+        expect(coalesced.statusCode).toBe(302);
+        expect(coalesced.headers["x-cache"]).toBe("COALESCED");
+        expect(write.statusCode).toBe(201);
+        expect(await redis.get(`shortlink:redirect:${queuedCode}`)).toBeNull();
+      } finally {
+        await locker.end();
+        await redis.del("shortlink:redirect:guard-hit");
       }
     });
 

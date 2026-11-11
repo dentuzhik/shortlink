@@ -37,6 +37,17 @@ Set `REDIS_CACHE_HEADER=1` when running `pnpm stack:up` to see `X-Cache: HIT`
 on a Redis hit or `X-Cache: COALESCED` on a redirect that waited for another
 request's lookup. Set `REDIS_URL` to an empty value to disable caching in Compose.
 
+Redirects that need Postgres return `503` when the pool has 128 waiting
+checkouts or when acquiring a connection takes 50 ms. Configure these per-process
+limits with `REDIRECT_DB_MAX_WAITERS` and `REDIRECT_DB_CHECKOUT_TIMEOUT_MS`.
+Cache hits and requests sharing an existing lookup bypass checkout. Link
+creation uses the same pool and its normal checkout path.
+
+After a redirect's checkout deadline expires, pg can retain its waiter until a
+connection arrives or pg's own timeout fires. The waiter counts toward the queue
+cap. A late connection is released immediately so the expired request performs
+no query.
+
 ## Run in local Kubernetes
 
 With Colima running and `kind` and `kubectl` installed, run:

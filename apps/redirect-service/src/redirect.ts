@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { RedirectPoolBusyError } from "./redirect-admission.js";
 
 export type RedirectCacheSource = "HIT" | "COALESCED";
 
@@ -43,6 +44,11 @@ export function registerRedirectRoute(
 
       return reply.redirect(targetUrl, 302);
     } catch (error) {
+      if (error instanceof RedirectPoolBusyError) {
+        return reply
+          .code(503)
+          .send({ error: "Redirect temporarily unavailable" });
+      }
       request.log.error(
         { errorType: error instanceof Error ? error.name : "unknown" },
         "Link lookup failed",

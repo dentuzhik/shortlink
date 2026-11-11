@@ -12,7 +12,10 @@ async function selectTargetUrl(db: NodePgDatabase, code: string) {
   return link?.targetUrl;
 }
 
-export function createLinkStore(pool: Pool) {
+export function createLinkStore(
+  pool: Pool,
+  checkoutRedirect = () => pool.connect(),
+) {
   const db = drizzle({ client: pool });
 
   return {
@@ -35,13 +38,9 @@ export function createLinkStore(pool: Pool) {
       code: string,
       onDatabaseTiming?: (checkoutMs: number, lookupMs: number) => void,
     ) {
-      if (!onDatabaseTiming) {
-        return selectTargetUrl(db, code);
-      }
-
-      const startedAt = performance.now();
-      const client = await pool.connect();
-      const waitMs = performance.now() - startedAt;
+      const startedAt = onDatabaseTiming ? performance.now() : 0;
+      const client = await checkoutRedirect();
+      const waitMs = onDatabaseTiming ? performance.now() - startedAt : 0;
       let discardClient = false;
       const onClientError = () => {
         discardClient = true;
@@ -50,9 +49,9 @@ export function createLinkStore(pool: Pool) {
       client.on("error", onClientError);
       try {
         const lookupDb = drizzle({ client });
-        const lookupStartedAt = performance.now();
+        const lookupStartedAt = onDatabaseTiming ? performance.now() : 0;
         const targetUrl = await selectTargetUrl(lookupDb, code);
-        onDatabaseTiming(waitMs, performance.now() - lookupStartedAt);
+        onDatabaseTiming?.(waitMs, performance.now() - lookupStartedAt);
         return targetUrl;
       } catch (error) {
         discardClient = true;

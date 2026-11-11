@@ -5,6 +5,7 @@ import { registerGraphQL } from "./graphql.js";
 import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
 import { registerRedirectRoute } from "./redirect.js";
+import { createRedirectCheckout } from "./redirect-admission.js";
 import { createRedirectCache } from "./redirect-cache.js";
 
 export function buildApp(
@@ -14,6 +15,8 @@ export function buildApp(
     reportPoolWait = false,
     redisUrl = "",
     reportCacheHit = false,
+    redirectMaxWaiters = 128,
+    redirectCheckoutTimeoutMs = 50,
   } = {},
 ) {
   const app = Fastify({
@@ -21,7 +24,12 @@ export function buildApp(
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   const pool = createDatabasePool(databaseUrl, poolMax);
-  const linkStore = createLinkStore(pool);
+  const checkoutRedirect = createRedirectCheckout(
+    pool,
+    redirectMaxWaiters,
+    redirectCheckoutTimeoutMs,
+  );
+  const linkStore = createLinkStore(pool, checkoutRedirect);
   const cache = redisUrl
     ? createRedirectCache(redisUrl, linkStore.findTargetUrl, app.log)
     : undefined;

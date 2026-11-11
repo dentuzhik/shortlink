@@ -552,3 +552,32 @@ rates the local setup fell short of delivering the requested load while
 started redirects continued to meet the 99% latency threshold. These trials
 show the limit of what the local benchmark verified with healthy Redis. They
 leave the service's 100 ms ceiling open at higher delivered rates.
+
+### Redirect admission under Redis timeouts
+
+The redirect checkout guard rejects a new Postgres lookup when the shared pool
+has 128 waiting checkouts or the redirect spends 50 ms acquiring a connection.
+These initial settings are configurable with `REDIRECT_DB_MAX_WAITERS` and
+`REDIRECT_DB_CHECKOUT_TIMEOUT_MS`. Redis hits bypass checkout and coalesced
+requests share the leader's admission result. Rejected redirects receive `503`
+and count against the 100 ms correctness target.
+
+```sh
+BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 \
+  BENCH_POOL_MAX=5 BENCH_VUS=400 BENCH_RATES='1000 3250 4000' \
+  BENCH_BUDGET_CASES=timeout pnpm bench:redirect
+```
+
+| Redirects/s | Correct within 100 ms | `503` responses | Successful redirect p99 (ms) | `503` p99 (ms) | Pool checkout p99 (ms) | Creation p99 (ms) | Dropped starts |
+| ----------: | --------------------: | --------------: | ---------------------------: | -------------: | ---------------------: | ----------------: | -------------: |
+|       1,000 |                  100% |               0 |                           28 |              — |                  0.071 |                 5 |              0 |
+|       3,250 |                99.65% |             339 |                           69 |             87 |                  35.34 |             42.04 |              0 |
+|       4,000 |                97.30% |           3,230 |                           76 |             90 |                  42.17 |                55 |              0 |
+
+Each trial ran for 30 seconds with 10 creations/s. All creation requests
+returned `201`. The 1,000 and 3,250/s trials met the target. At 4,000/s, the
+benchmark failed the correctness target because 2.70% of redirects received
+`503`. Successful redirects had a 76 ms p99, and the load generator delivered
+the full offered load. Compare this with the earlier unguarded 4,000/s trial,
+where redirect p99 was 152 ms and k6 dropped 4,491 starts. These are separate
+local runs, so the comparison includes run-to-run variation.
