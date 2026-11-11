@@ -4,6 +4,7 @@ import { createDatabasePool } from "./database.js";
 import { registerGraphQL } from "./graphql.js";
 import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
+import { registerMetrics } from "./metrics.js";
 import { registerRedirectRoute } from "./redirect.js";
 import { createRedirectCheckout } from "./redirect-admission.js";
 import { createRedirectCache } from "./redirect-cache.js";
@@ -24,6 +25,8 @@ export function buildApp(
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   const pool = createDatabasePool(databaseUrl, poolMax);
+  const metricsServer = registerMetrics(app, pool);
+  app.decorate("metricsServer", metricsServer);
   const checkoutRedirect = createRedirectCheckout(
     pool,
     redirectMaxWaiters,
@@ -40,6 +43,7 @@ export function buildApp(
   });
 
   app.addHook("onClose", async () => {
+    await metricsServer.close();
     cache?.close();
     await pool.end();
   });

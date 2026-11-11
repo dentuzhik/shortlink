@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "dependencies": {
+    "@prometheus-io/client": "0.16.1",
     "@url-shortener/db": "workspace:*",
     "fastify": "5.12.8",
     "graphql": "17.1.0",

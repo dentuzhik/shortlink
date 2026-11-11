@@ -17,7 +17,7 @@ COPY --chown=node:node . .
 FROM workspace AS redirect
 RUN pnpm --filter @url-shortener/redirect-service... build
 ENV NODE_ENV=production LISTEN_HOST=0.0.0.0
-EXPOSE 3000
+EXPOSE 3000 9090
 ENTRYPOINT ["sh", "/app/scripts/container-db.sh"]
 CMD ["node", "apps/redirect-service/dist/server.js"]
 

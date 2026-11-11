@@ -1,3 +1,4 @@
+import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { readDatabaseUrl } from "./database.js";
 
@@ -27,6 +28,10 @@ process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
 try {
+  await app.getDecorator<FastifyInstance>("metricsServer").listen({
+    host: process.env.LISTEN_HOST ?? "127.0.0.1",
+    port: Number(process.env.METRICS_PORT ?? 9090),
+  });
   await app.listen({
     host: process.env.LISTEN_HOST ?? "127.0.0.1",
     port: 3000,

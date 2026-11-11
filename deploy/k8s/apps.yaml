@@ -19,6 +19,8 @@ spec:
           ports:
             - name: http
               containerPort: 3000
+            - name: metrics
+              containerPort: 9090
           envFrom:
             - secretRef:
                 name: postgres-credentials
@@ -51,8 +53,23 @@ spec:
   selector:
     app: redirect-service
   ports:
-    - port: 3000
+    - name: http
+      port: 3000
       targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redirect-metrics
+spec:
+  # Monitoring must remain reachable when application readiness fails.
+  publishNotReadyAddresses: true
+  selector:
+    app: redirect-service
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
 ---
 apiVersion: apps/v1
 kind: Deployment

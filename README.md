@@ -149,6 +149,84 @@ created and copied a `go.localhost` link through GraphQL; visiting that link
 returned the correct `302`, `Location`, and `Cache-Control: no-store`. Missing
 codes and unmatched hostnames returned `404`. Gateway setup also passed a rerun.
 
+## Inspect application metrics
+
+Fastify now records metrics using the pinned official Node.js client,
+`@prometheus-io/client`. Each application instance owns a registry in memory.
+The `onResponse` hook counts completed responses and observes their Fastify
+duration. A second Fastify listener serves the registry at `/metrics` on port
+9090. Closing the application also closes that listener before ending the pool.
+
+| Metric                                    | Type      | Meaning                                                              |
+| :---------------------------------------- | :-------- | :------------------------------------------------------------------- |
+| `shortlink_http_requests_total`           | Counter   | Completed responses by HTTP method, route template, and status code. |
+| `shortlink_http_request_duration_seconds` | Histogram | Response durations in seconds, using the same labels.                |
+| `shortlink_db_pool_connections`           | Gauge     | Existing pool clients with `state="idle"` or `state="in_use"`.       |
+| `shortlink_db_pool_waiting_requests`      | Gauge     | Checkouts currently waiting in the pg pool queue.                    |
+
+Counters and histograms accumulate until the process restarts. Pool gauges read
+`totalCount`, `idleCount`, and `waitingCount` when scraped; collecting them opens
+no connections and runs no SQL. `in_use` is `totalCount - idleCount`, which includes
+clients still connecting and is not a count of active SQL queries. These are
+snapshots, so a periodic scrape can miss a short queue spike.
+
+Route labels use `/:code`, `/links`, `/graphql`, or `unmatched`; they contain no
+short codes, destinations, request bodies, or query strings. Uncommon HTTP
+methods are grouped as `OTHER`. Health/readiness probes and requests to the
+separate metrics listener are excluded from application HTTP metrics.
+
+The histogram has a bucket at `0.1` seconds. Its count gives the exact number of
+observed server responses at or below 100 ms; later, Prometheus can estimate
+percentiles from all the buckets. This measures Fastify time, while our performance
+target measures client time and correct redirects. HTTP status is also separate
+from GraphQL operation success: an error inside an HTTP `200` response is counted
+as HTTP `200`. Operation-outcome metrics can be added in a later increment.
+
+With `pnpm dev` running on the host:
+
+```sh
+curl http://127.0.0.1:9090/metrics
+```
+
+The host listener uses `METRICS_PORT` if supplied; containers use port 9090.
+Compose leaves this port unpublished. In Kubernetes, the internal
+`redirect-metrics:9090` Service selects the Fastify pods. It publishes unready
+pods too, so application readiness failures do not hide monitoring. The normal
+`redirect-service:3000` Service continues to select ready endpoints for user
+traffic. The Gateway references only that application port.
+
+After `pnpm k8s:up`, inspect metrics from inside a pod:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink exec deployment/web -- \
+  node -e 'fetch("http://redirect-metrics:9090/metrics").then(r => r.text()).then(console.log)'
+```
+
+For temporary access from the Mac, forward only the private metrics Service in
+one terminal, then run curl in another:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink port-forward \
+  --address 127.0.0.1 service/redirect-metrics 19090:9090
+```
+
+```sh
+curl http://127.0.0.1:19090/metrics
+```
+
+A response after two successful redirects might include:
+
+```text
+shortlink_http_requests_total{method="GET",route="/:code",status_code="302"} 2
+shortlink_db_pool_connections{state="in_use"} 0
+shortlink_db_pool_connections{state="idle"} 1
+shortlink_db_pool_waiting_requests 0
+```
+
+At this checkpoint the application exposes measurements; Prometheus history
+collection and Grafana dashboards come in the next increment. The registry is
+per process, so that collection must scrape individual pods when we add replicas.
+
 ## Run the services on the host for development
 
 Prerequisites: Node.js 26.13.0, pnpm 12.18.0, Colima, Docker CLI, and Docker Compose.
@@ -359,4 +437,6 @@ References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guid
 [Testcontainers on Colima](https://node.testcontainers.org/supported-container-runtimes/#colima),
 [Traefik Gateway API](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/gateway-api/),
 [kind host networking](https://kind.sigs.k8s.io/docs/user/quick-start/#mapping-ports-to-the-host-machine),
+[Prometheus Node.js client](https://github.com/prometheus/client_js),
+[Fastify response hooks](https://fastify.dev/docs/latest/Reference/Hooks/#onresponse),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

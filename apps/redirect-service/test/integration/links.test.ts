@@ -5,6 +5,7 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
+import type { FastifyInstance } from "fastify";
 import { Redis } from "ioredis";
 import { Client } from "pg";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
@@ -126,6 +127,96 @@ describe("links with Postgres", () => {
       data: null,
       errors: [{ extensions: { code: "BAD_USER_INPUT" } }],
     });
+  });
+
+  test("serves metrics separately, observes a real pool queue, and closes both listeners", async () => {
+    const monitored = buildApp(databaseUrl, { poolMax: 1 });
+    monitored.log.level = "silent";
+    onTestFinished(() => monitored.close());
+    const applicationUrl = await monitored.listen({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    const metrics = monitored.getDecorator<FastifyInstance>("metricsServer");
+    const metricsUrl = await metrics.listen({ host: "127.0.0.1", port: 0 });
+    const scrape = async () => {
+      const response = await fetch(`${metricsUrl}/metrics`);
+      expect(response.status).toBe(200);
+      return response.text();
+    };
+    const targetUrl = "https://example.com/metrics";
+    const created = await monitored.inject({
+      method: "POST",
+      url: "/links",
+      payload: { targetUrl },
+    });
+    const code = created.json<{ code: string }>().code;
+    expect(created.statusCode).toBe(201);
+
+    const locker = new Client({ connectionString: databaseUrl });
+    await locker.connect();
+    const pending: Promise<unknown>[] = [];
+    try {
+      await locker.query("BEGIN");
+      await locker.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+      const redirect = monitored
+        .inject(`/${code}`)
+        .then((response) => response);
+      pending.push(redirect);
+      await vi.waitFor(
+        async () => {
+          expect(await scrape()).toContain(
+            'shortlink_db_pool_connections{state="in_use"} 1',
+          );
+        },
+        { interval: 5, timeout: 250 },
+      );
+      const write = monitored
+        .inject({ method: "POST", url: "/links", payload: { targetUrl } })
+        .then((response) => response);
+      pending.push(write);
+      await vi.waitFor(
+        async () => {
+          const body = await scrape();
+          expect(body).toContain(
+            'shortlink_db_pool_connections{state="idle"} 0',
+          );
+          expect(body).toContain("shortlink_db_pool_waiting_requests 1");
+        },
+        { interval: 5, timeout: 250 },
+      );
+      await locker.query("ROLLBACK");
+      expect((await redirect).statusCode).toBe(302);
+      expect((await write).statusCode).toBe(201);
+    } finally {
+      await locker.query("ROLLBACK");
+      await Promise.allSettled(pending);
+      await locker.end();
+    }
+    const invalidGraphql = await monitored.inject({
+      method: "POST",
+      url: "/graphql",
+      payload: {
+        query:
+          'mutation { createLink(input: { targetUrl: "ftp://example.com" }) { code } }',
+      },
+    });
+    expect(invalidGraphql.statusCode).toBe(200);
+    expect(invalidGraphql.json()).toHaveProperty("errors");
+    const body = await scrape();
+    expect(body).toContain('shortlink_db_pool_connections{state="idle"} 1');
+    expect(body).toContain("shortlink_db_pool_waiting_requests 0");
+    expect(body).toContain(
+      'shortlink_http_requests_total{method="POST",route="/graphql",status_code="200"} 1',
+    );
+    const publicMetrics = await monitored.inject("/metrics");
+    expect(publicMetrics.statusCode).toBe(404);
+    expect(publicMetrics.body).not.toContain("shortlink_db_pool_connections");
+    await monitored.close();
+    expect(monitored.server.listening).toBe(false);
+    expect(metrics.server.listening).toBe(false);
+    await expect(fetch(`${applicationUrl}/healthz`)).rejects.toThrow();
+    await expect(fetch(`${metricsUrl}/metrics`)).rejects.toThrow();
   });
 
   describe("redirect cache with Redis", () => {
