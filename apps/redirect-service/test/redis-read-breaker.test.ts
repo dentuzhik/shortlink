@@ -47,6 +47,43 @@ describe("Redis read circuit breaker", () => {
     expect(log.info).toHaveBeenCalledWith("Redis read circuit closed");
   });
 
+  test("records a timed-out concurrent burst without leaking error messages", async () => {
+    const { clock, read, log, lookup } = setup();
+    const pending = Array.from({ length: 6 }, () =>
+      Promise.withResolvers<string | null>(),
+    );
+    for (const request of pending) read.mockReturnValueOnce(request.promise);
+    const requests = pending.map(() => lookup("code"));
+    clock.mockReturnValue(40);
+    for (const request of pending)
+      request.reject(new Error("Command timed out"));
+    await Promise.all(requests);
+    expect(log.warn).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        failureKind: "command-timeout",
+        readElapsedMs: 40,
+        otherInFlightReads: 1,
+        trigger: "threshold",
+      }),
+      "Redis read circuit opened",
+    );
+
+    clock.mockReturnValue(1040);
+    read.mockRejectedValueOnce(new Error("private connection details"));
+    await lookup("probe");
+    expect(log.warn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        failureKind: "other",
+        otherInFlightReads: 0,
+        trigger: "probe",
+      }),
+      "Redis read circuit opened",
+    );
+    expect(JSON.stringify(log.warn.mock.calls)).not.toContain(
+      "private connection details",
+    );
+  });
+
   test("a failed probe restarts the cooldown and a successful miss closes it", async () => {
     const { clock, read, lookup } = setup();
     read.mockRejectedValue(new Error("Redis timed out"));

@@ -8,6 +8,17 @@ services:
       DB_POOL_TIMING: "1"
       REDIS_URL: ${BENCH_REDIS_URL:-}
       REDIS_CACHE_HEADER: "1"
+      BENCH_DIAGNOSTICS: ${BENCH_DIAGNOSTICS:-0}
+    # Scope the preload to Fastify, excluding entrypoint helpers and health probes.
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$$BENCH_DIAGNOSTICS" = 1 ]; then
+          exec node --import=/app/benchmarks/runtime-diagnostics.mjs apps/redirect-service/dist/server.js
+        else
+          exec node apps/redirect-service/dist/server.js
+        fi
   k6:
     image: grafana/k6:2.3.0
     environment:

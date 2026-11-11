@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -33,12 +34,15 @@ async function compose(...args) {
 }
 // Resolve containers before the timed run, avoiding Compose discovery at each
 // transition while the VM is busy serving traffic.
-const [redisId, proxyId] = await Promise.all(
-  ["redis", "redis-proxy"].map(async (service) =>
+const [redisId, proxyId, serviceId] = await Promise.all(
+  ["redis", "redis-proxy", "redirect-service"].map(async (service) =>
     (await compose("ps", "-q", service)).trim(),
   ),
 );
-assert(redisId && proxyId, "Recovery benchmark containers are missing");
+assert(
+  redisId && proxyId && serviceId,
+  "Recovery benchmark containers are missing",
+);
 async function containerExec(id, ...args) {
   return (await run("docker", ["exec", id, ...args])).stdout;
 }
@@ -59,9 +63,45 @@ async function getCalls() {
 }
 
 const directory = await mkdtemp(join(tmpdir(), "shortlink-recovery-"));
+const diagnostics = process.env.BENCH_DIAGNOSTICS === "1";
+const injectStall = process.env.BENCH_EVENT_LOOP_STALL === "1";
+assert(
+  !injectStall || diagnostics,
+  "Event-loop fault injection requires diagnostics",
+);
 const summaryPath = join(directory, "summary.json");
 // Both the native load generator and this controller use the host clock.
 const startAt = Date.now() + 5000;
+if (diagnostics) {
+  await writeFile(
+    join(directory, "trial.json"),
+    JSON.stringify(
+      { startAt, rate: Number(rate), baseUrl, injectStall },
+      null,
+      2,
+    ),
+  );
+}
+// Include the cohosted kind cluster in the VM resource trace.
+const statsLog = diagnostics
+  ? createWriteStream(join(directory, "docker-stats.jsonl"))
+  : undefined;
+const stats = diagnostics
+  ? spawn("docker", ["stats", "--format", "{{json .}}"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+  : undefined;
+stats?.stdout.on("data", (chunk) =>
+  statsLog.write(
+    `${JSON.stringify({ time: Date.now(), samples: chunk.toString() })}\n`,
+  ),
+);
+const statsFinished = stats
+  ? new Promise((resolve) => {
+      stats.once("close", resolve);
+      stats.once("error", resolve);
+    })
+  : undefined;
 const child = spawn(
   "k6",
   [
@@ -111,6 +151,13 @@ try {
   console.log(
     `\nContinuous recovery trial: ${rate} redirects/s + 10 creations/s; 15s healthy → 15s delayed → 15s recovery`,
   );
+  if (injectStall) {
+    await until(5000);
+    console.log(
+      "Injecting a 50ms Fastify event-loop stall at +5s; Redis is unchanged",
+    );
+    await containerExec(serviceId, "sh", "-c", "kill -USR2 1");
+  }
   await transition(15000, async () => {
     await proxy("toxic", "add", "-t", "latency", "-a", "latency=75", "redis");
     toxicInstalled = true;
@@ -176,13 +223,36 @@ try {
     .split("\n")
     .filter((line) => line.includes('"msg":"Redis read circuit '))
     .map((line) => JSON.parse(line));
+  if (diagnostics) {
+    await writeFile(join(directory, "service.log"), logs);
+    const redis = await containerExec(
+      redisId,
+      "redis-cli",
+      "-e",
+      "INFO",
+      "all",
+    );
+    await writeFile(join(directory, "redis-info.txt"), redis);
+    const slowlog = await containerExec(
+      redisId,
+      "redis-cli",
+      "--json",
+      "SLOWLOG",
+      "GET",
+      "128",
+    );
+    await writeFile(join(directory, "redis-slowlog.json"), slowlog);
+  }
   for (const event of events)
     console.log(
-      `Breaker at +${((event.time - startAt) / 1000).toFixed(3)}s: ${event.msg}`,
+      `Breaker at +${((event.time - startAt) / 1000).toFixed(3)}s: ${JSON.stringify(event)}`,
     );
   assert(
     events.some(
-      (event) => event.msg.endsWith("opened") && event.time < startAt + 30000,
+      (event) =>
+        event.msg.endsWith("opened") &&
+        event.time >= startAt + 15000 &&
+        event.time < startAt + 30000,
     ),
     "Circuit did not open during the fault",
   );
@@ -197,7 +267,13 @@ try {
   if (child.exitCode === null && child.signalCode === null)
     child.kill("SIGTERM");
   await finished;
+  if (stats) {
+    stats.kill("SIGTERM");
+    await statsFinished;
+    statsLog.end();
+  }
   if (toxicInstalled)
     await proxy("toxic", "remove", "-n", "latency_downstream", "redis");
-  await rm(directory, { recursive: true, force: true });
+  if (diagnostics) console.log(`Diagnostic artifacts: ${directory}`);
+  else await rm(directory, { recursive: true, force: true });
 }

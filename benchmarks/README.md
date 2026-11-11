@@ -675,3 +675,78 @@ timeout or the breaker's five-failure threshold. These runs demonstrate recovery
 and bounded reads during the injected delay, while showing variation before
 the fault at 3,250/s. They do not establish a higher throughput ceiling or
 guarantee zero service degradation.
+
+### Investigating the pre-fault breaker trip
+
+The measurements above belong to this local environment: an ARM64 Colima VM
+configured with **2 vCPUs and 2 GiB RAM**, shared with the kind cluster and the
+development Postgres container. Native k6 runs on the Mac and reaches the
+benchmark through Docker's published port. A larger dedicated deployment has
+different scheduling, networking, and resource contention; its throughput and
+latency targets need measurements in that deployment. These numbers are not a
+hardware-independent service ceiling.
+
+The breaker opens after five consecutive failed read completions. Those failures
+can come from concurrent requests in one burst. Successful reads reset the
+counter; late results from an older circuit state cannot change recovery. The
+ioredis command deadline is a Node timer, so its elapsed time includes waiting
+to process a response in the application, as well as Redis and network time.
+An event-loop delay alone does not establish that five read promises timed out.
+
+The investigation keeps the 25 ms command timeout, five-failure threshold, and
+one-second cooldown fixed. Opening logs now distinguish command timeouts from
+other errors, show elapsed read time, count other outstanding read calls, and
+identify an initial threshold trip versus a failed recovery probe. A unit test
+covers a concurrent timeout burst and verifies that arbitrary error messages
+are excluded from these logs.
+
+To retain diagnostic traces during the recovery benchmark:
+
+```sh
+BENCH_DIAGNOSTICS=1 BENCH_REDIS_RECOVERY=1 BENCH_LATENCY_BUDGET=1 \
+  BENCH_REDIS=1 BENCH_HOST=1 BENCH_PORT=38175 BENCH_POOL_MAX=5 \
+  BENCH_VUS=400 BENCH_RATES='1000 3250 3250' pnpm bench:redirect
+```
+
+The opt-in preload runs in Fastify only. Every 250 ms it records event-loop
+delay, utilization, process CPU, heap usage, and the longest observed GC pause.
+Separate Redis connections probe the direct path and the Toxiproxy path.
+The controller retains `summary.json`, `trial.json`, `service.log`, Redis `INFO`
+and `SLOWLOG` snapshots, and a timestamped Docker resource trace including the
+kind cluster. It prints the temporary artifact directory even when k6 fails.
+The benchmark containers and data volumes are still removed.
+
+November 11 investigation results, for the 15 seconds before proxy fault injection:
+
+| Trial                          | Redirects/s | Maximum event-loop delay (ms) | Maximum GC pause (ms) | Early circuit opens | Cache hits |
+| :----------------------------- | ----------: | ----------------------------: | --------------------: | ------------------: | ---------: |
+| Fresh process                  |       3,250 |                         15.22 |                  9.69 |                   0 |       100% |
+| Sequence, first rate           |       1,000 |                          9.21 |                  2.21 |                   0 |       100% |
+| Sequence, second rate          |       3,250 |                         14.51 |                  4.46 |                   0 |       100% |
+| Sequence, third rate           |       3,250 |                         12.32 |                  1.76 |                   0 |       100% |
+| Deliberate 50 ms process pause |       3,250 |                         53.44 |                  4.07 |                   0 |       100% |
+
+All five trials met the per-phase 99%-within-100-ms target, had zero dropped
+starts, and successfully created all offered links. During the normal injected
+75 ms proxy delay, the fresh-process trial opened the circuit with a command
+timeout after 28.12 ms and 80 other read calls outstanding. Independent proxy
+probes reached 80.72 ms while direct probes peaked at 6.06 ms during that phase.
+This validates the diagnostics against a known dependency delay.
+
+For the process-pause control, add `BENCH_EVENT_LOOP_STALL=1` to the command and
+use `BENCH_RATES=3250`. At +5 seconds the controller sends `SIGUSR2` to the
+benchmark Node process; its diagnostic handler performs 50 ms of synchronous
+work. This handler exists only in the opt-in benchmark preload. The measured
+pause was 50.03 ms, and the event-loop monitor detected it. It did not reproduce
+the breaker trip: a pause need not coincide with five pending reads that reject.
+The 250 ms independent probes also missed this brief pause, demonstrating why
+low-rate probes alone cannot rule out a short spike.
+
+**The original pre-fault trip remains unexplained.** It did not recur in three
+instrumented 3,250/s trials or the process-pause control. The earlier logs only
+recorded circuit transitions, so they cannot establish the failing read type or
+correlate it with a runtime pause. Empty Redis slow logs in the diagnostic runs
+do not rule out scheduling or network delays, and instrumentation can alter
+timing. The new measurements support capturing a future occurrence; they do not
+justify attributing the original event to GC, the VM, or Redis, or tuning the
+breaker settings yet.
