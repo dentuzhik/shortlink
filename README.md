@@ -75,6 +75,7 @@ and deploys Fastify, Next.js, and a Traefik Gateway. It then starts a background
 Docker TCP bridge on `127.0.0.1:8080`. You can close the terminal; no interactive
 port-forward is required. The kubeconfig stays in the ignored `.kind/` directory,
 so the commands do not switch your default Kubernetes context.
+The same command also provisions local Prometheus and Grafana monitoring.
 
 The existing kind node was created without a Docker mapping for HTTP traffic.
 The bridge connects to its NodePort over Docker's `kind` network, preserving the
@@ -223,9 +224,106 @@ shortlink_db_pool_connections{state="idle"} 1
 shortlink_db_pool_waiting_requests 0
 ```
 
-At this checkpoint the application exposes measurements; Prometheus history
-collection and Grafana dashboards come in the next increment. The registry is
-per process, so that collection must scrape individual pods when we add replicas.
+The registry is per process. The monitoring configuration below discovers and
+scrapes individual pods, preserving that separation when replicas are added.
+
+## View Grafana dashboards and generate traffic
+
+With the Kubernetes stack running, provision or update monitoring with:
+
+```sh
+pnpm monitoring:up
+```
+
+This also runs as part of `pnpm k8s:up`. Open the
+[Shortlink dashboard](http://grafana.localhost:8080/d/shortlink-overview/shortlink-overview).
+It observes the Fastify pods in the kind cluster, reached by the Gateway URLs.
+
+Log in as **admin**. The first installation generates a random password in the
+ignored `.kind/grafana-admin.env` file and creates the Kubernetes Secret
+`grafana-admin`. Retrieve the initial password with:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get secret grafana-admin \
+  -o jsonpath='{.data.GF_SECURITY_ADMIN_PASSWORD}' | base64 -d
+```
+
+`scripts/monitoring-up.sh` creates the Secret once. The Grafana Deployment in
+`deploy/k8s/monitoring.yaml` reads it as `GF_SECURITY_ADMIN_USER` and
+`GF_SECURITY_ADMIN_PASSWORD` environment variables. Grafana persists its account
+in its own database on a PVC; editing the initial-password file or Secret alone
+does not rotate an existing account's password.
+
+The new infrastructure dependencies are pinned to **Prometheus v3.16.0** and
+**Grafana 13.3.1**. Prometheus remains internal; Grafana uses the existing Gateway
+at `grafana.localhost:8080`. Each component has a 1 GiB PVC. Prometheus retains
+history for up to 24 hours, bounded to 256 MB of retained blocks. The monitoring
+startup waits for both deployments and healthy Fastify scrape targets.
+
+The checked-in files have distinct jobs:
+
+| File                                        | Purpose                                                                          |
+| :------------------------------------------ | :------------------------------------------------------------------------------- |
+| `deploy/monitoring/prometheus.yaml`         | Discover the metrics Service's pod endpoints and scrape each every five seconds. |
+| `deploy/monitoring/grafana-datasource.yaml` | Connect Grafana to the internal Prometheus API.                                  |
+| `deploy/monitoring/grafana-dashboards.yaml` | Load dashboards from files.                                                      |
+| `deploy/monitoring/shortlink.json`          | Define panels and their PromQL queries.                                          |
+| `deploy/k8s/monitoring.yaml`                | Deploy the collector, UI, storage, discovery permissions, and Grafana route.     |
+
+Prometheus queries each pod on port 9090. Grafana asks Prometheus for the recorded
+history; viewing a chart does not scrape Fastify directly. The dashboard shows
+request rates, server latency percentiles, HTTP statuses, cumulative `5xx`
+responses in current pods, and database-pool state. Its 30-second rate windows
+smooth and lag the load stages. Histogram percentiles are estimates; the client
+latency target still needs client measurements.
+
+Run the demonstration load:
+
+```sh
+pnpm load:demo
+```
+
+The 225-second k6 scenario ramps through 100 → 500 → 1,000 → 100 redirects/s,
+plus one GraphQL link creation/s. Five percent of visits deliberately request
+missing codes. Setup creates 50 fixture links through REST, and the scenario
+creates about 225 additional links through GraphQL. It validates redirect
+destinations without following them. These demo records remain in the local DB.
+
+The script uses a native `k6` when it is on `PATH`. Otherwise it runs the pinned
+`grafana/k6:2.3.0` Docker image on the kind network. The Docker runner shares the
+VM's resources with the application. Both paths traverse the TCP bridge and the
+same Gateway routes. The first run below used native k6 on the Mac.
+
+The summary is saved to `.kind/observability/last-summary.json`. After a successful
+run, `.kind/observability/last-run.json` includes a dashboard URL with the exact
+recorded time window. Select **Last 15 minutes** in Grafana to return to a live
+view before another run. These results describe this local setup with monitoring
+running; the demo is not a throughput-ceiling qualification.
+
+The November 11, 2026 demonstration completed with:
+
+| Measurement                               | Result |
+| :---------------------------------------- | -----: |
+| Total link visits                         | 98,999 |
+| Existing-link visits                      | 94,049 |
+| Correct `302` responses                   | 94,048 |
+| Unexpected `503` responses                |      1 |
+| Deliberate missing-code visits, all `404` |  4,950 |
+| GraphQL creations, all successful         |    225 |
+| Dropped starts                            |      0 |
+| Existing-link client p99                  |  12 ms |
+
+Grafana's recorded rate reached approximately 1,000 redirects/s. All twelve panel
+queries returned time-series data, and history, provisioning, and login survived
+a monitoring restart. The Docker runner's network path and summary output also
+passed a one-request smoke check.
+
+The pool waiting gauge stayed at zero at scrape times. That does not rule out a
+short queue between five-second samples. The `5xx` total shows the single `503`;
+its rate chart can miss the first event of a newly observed status series when
+the initial counter sample is already one. This is why the dashboard includes
+both cumulative totals and rates. A Grafana screenshot and query-check results
+are saved under `.kind/observability/`.
 
 ## Run the services on the host for development
 
@@ -439,4 +537,6 @@ References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guid
 [kind host networking](https://kind.sigs.k8s.io/docs/user/quick-start/#mapping-ports-to-the-host-machine),
 [Prometheus Node.js client](https://github.com/prometheus/client_js),
 [Fastify response hooks](https://fastify.dev/docs/latest/Reference/Hooks/#onresponse),
+[Prometheus Kubernetes discovery](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#kubernetes_sd_config),
+[Grafana provisioning](https://grafana.com/docs/grafana/latest/administration/provisioning/),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

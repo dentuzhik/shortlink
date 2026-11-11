@@ -14,6 +14,8 @@
     "k8s:up": "sh scripts/k8s-up.sh",
     "k8s:gateway": "sh scripts/k8s-gateway.sh",
     "k8s:gateway:down": "docker compose -f deploy/kind/compose.yaml down",
+    "monitoring:up": "sh scripts/monitoring-up.sh",
+    "load:demo": "sh scripts/load-demo.sh",
     "k8s:forward": "sh scripts/k8s-forward.sh",
     "bench:redirect": "sh scripts/bench-redirect.sh",
     "build": "pnpm -r run build",

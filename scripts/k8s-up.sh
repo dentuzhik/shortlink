@@ -54,3 +54,4 @@ kube rollout status deployment/redirect-service --timeout=120s
 kube rollout status deployment/web --timeout=120s
 kube get pods,services,jobs
 sh scripts/k8s-gateway.sh
+sh scripts/monitoring-up.sh
