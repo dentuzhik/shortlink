@@ -37,6 +37,14 @@ Set `REDIS_CACHE_HEADER=1` when running `pnpm stack:up` to see `X-Cache: HIT`
 on a Redis hit or `X-Cache: COALESCED` on a redirect that waited for another
 request's lookup. Set `REDIS_URL` to an empty value to disable caching in Compose.
 
+Each Fastify process opens its Redis read circuit after five consecutive read
+errors or timeouts. For one second, requests go directly to the coalesced
+Postgres fallback. After the cooldown, one request probes Redis while concurrent
+requests continue through the fallback. A successful reply, including a cache
+miss, closes the circuit. A failed probe starts another one-second cooldown.
+Open and closed transitions are logged. Replies from earlier attempts can
+complete their own requests while recovery proceeds independently.
+
 Redirects that need Postgres return `503` when the pool has 128 waiting
 checkouts or when acquiring a connection takes 50 ms. Configure these per-process
 limits with `REDIRECT_DB_MAX_WAITERS` and `REDIRECT_DB_CHECKOUT_TIMEOUT_MS`.

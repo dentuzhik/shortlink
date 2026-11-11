@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { Redis } from "ioredis";
 import type { RedirectLookup } from "./redirect.js";
+import { createRedisReadBreaker } from "./redis-read-breaker.js";
 
 const ttlSeconds = 60;
 
@@ -16,6 +17,7 @@ export function createRedirectCache(
     autoResendUnfulfilledCommands: false,
   });
   const pendingLookups = new Map<string, Promise<string | undefined>>();
+  const readRedis = createRedisReadBreaker((key) => redis.get(key), log);
 
   redis.on("error", (error) => {
     log.warn({ errorType: error.name }, "Redis connection error");
@@ -27,17 +29,7 @@ export function createRedirectCache(
     onCacheSource,
   ) => {
     const key = `shortlink:redirect:${code}`;
-    let cachedUrl: string | null | undefined;
-
-    try {
-      cachedUrl = await redis.get(key);
-    } catch (error) {
-      log.debug(
-        { errorType: error instanceof Error ? error.name : "unknown" },
-        "Redis redirect lookup failed",
-      );
-      cachedUrl = undefined;
-    }
+    const cachedUrl = await readRedis(key);
 
     if (typeof cachedUrl === "string") {
       onCacheSource?.("HIT");

@@ -11,6 +11,7 @@ import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import {
   afterAll,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   onTestFinished,
@@ -151,15 +152,9 @@ describe("links with Postgres", () => {
         redirectCheckoutTimeoutMs: 400,
       });
       cachedApp.log.level = "silent";
-
-      // The app can serve from Postgres while its Redis connection opens.
-      await redis.set("shortlink:redirect:cache-ready", targetUrl, "EX", 60);
-      await vi.waitFor(async () => {
-        const response = await cachedApp.inject("/cache-ready");
-        expect(response.headers["x-cache"]).toBe("HIT");
-      });
-      await redis.del("shortlink:redirect:cache-ready");
     }, 120_000);
+
+    beforeEach(() => waitForCache(cachedApp));
 
     afterAll(async () => {
       try {
@@ -184,6 +179,20 @@ describe("links with Postgres", () => {
       return Number(
         /^keyspace_misses:(\d+)\r?$/m.exec(await redis.info("stats"))?.[1],
       );
+    }
+
+    async function waitForCache(app: ReturnType<typeof buildApp>) {
+      // Also wait for recovery after a preceding test has opened the circuit.
+      await redis.set("shortlink:redirect:cache-ready", targetUrl, "EX", 60);
+      await vi.waitFor(
+        async () => {
+          expect((await app.inject("/cache-ready")).headers["x-cache"]).toBe(
+            "HIT",
+          );
+        },
+        { timeout: 2500 },
+      );
+      await redis.del("shortlink:redirect:cache-ready");
     }
 
     test("fills Redis on a miss and returns a hit on the next visit", async () => {
@@ -327,6 +336,60 @@ describe("links with Postgres", () => {
         debug.mockRestore();
         await locker.end();
       }
+    });
+
+    test("opens the Redis read circuit and recovers through a successful miss", async () => {
+      const breakerApp = buildApp(databaseUrl, {
+        redisUrl,
+        reportCacheHit: true,
+        reportPoolWait: true,
+      });
+      breakerApp.log.level = "silent";
+      onTestFinished(() => breakerApp.close());
+      await waitForCache(breakerApp);
+      const code = await createLink();
+      const key = `shortlink:redirect:${code}`;
+      await redis.set(key, targetUrl, "EX", 60);
+      const debug = vi.spyOn(breakerApp.log, "debug");
+      onTestFinished(() => debug.mockRestore());
+      const readFailures = () =>
+        debug.mock.calls.filter(
+          ([, message]) => message === "Redis redirect lookup failed",
+        ).length;
+
+      await redis.call("CLIENT", "PAUSE", "500", "ALL");
+      try {
+        for (let i = 0; i < 5; i++) {
+          const response = await breakerApp.inject(`/${code}`);
+          expect(response.statusCode).toBe(302);
+          expect(response.headers.location).toBe(targetUrl);
+          expect(response.headers["server-timing"]).toContain("db_lookup");
+        }
+        expect(readFailures()).toBe(5);
+
+        const bypassed = await breakerApp.inject(`/${code}`);
+        expect(bypassed.statusCode).toBe(302);
+        expect(bypassed.headers["x-cache"]).toBeUndefined();
+        expect(bypassed.headers["server-timing"]).toContain("db_lookup");
+        expect(readFailures()).toBe(5);
+      } finally {
+        await redis.call("CLIENT", "UNPAUSE");
+      }
+
+      // Recovery must also work when the probe finds an expired cache entry.
+      await redis.del(key);
+      await vi.waitFor(
+        async () => {
+          const response = await breakerApp.inject(`/${code}`);
+          expect(response.statusCode).toBe(302);
+          expect(await redis.get(key)).toBe(targetUrl);
+        },
+        { timeout: 2500 },
+      );
+      const hit = await breakerApp.inject(`/${code}`);
+      expect(hit.statusCode).toBe(302);
+      expect(hit.headers["x-cache"]).toBe("HIT");
+      expect(hit.headers["server-timing"]).toBeUndefined();
     });
 
     test("queues distinct codes behind the Postgres pool during Redis read timeouts", async () => {
