@@ -10,7 +10,9 @@ kube() {
   kubectl --kubeconfig "$kubeconfig" --context "kind-$cluster" --namespace shortlink "$@"
 }
 
-docker compose --parallel 1 build redirect-service web
+docker compose build redirect-service
+# NEXT_PUBLIC_* values are compiled into the browser bundle by Next.js.
+docker compose build --build-arg NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080 web
 docker image inspect postgres:18.6 >/dev/null 2>&1 || docker pull postgres:18.6
 clusters=$(kind get clusters)
 if printf '%s\n' "$clusters" | grep -Fxq "$cluster"; then
@@ -51,4 +53,4 @@ fi
 kube rollout status deployment/redirect-service --timeout=120s
 kube rollout status deployment/web --timeout=120s
 kube get pods,services,jobs
-printf '\nRun pnpm k8s:forward to open the stack on ports 3100 and 3101.\n'
+sh scripts/k8s-gateway.sh

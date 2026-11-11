@@ -1,0 +1,16 @@
+# Expose the existing kind node without recreating it to add Docker port bindings.
+name: shortlink-edge
+services:
+  bridge:
+    image: haproxy:3.4.7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks: [kind]
+
+networks:
+  kind:
+    external: true
+    name: kind

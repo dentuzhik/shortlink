@@ -25,8 +25,9 @@ if needed. `pnpm stack:down` stops the stack and keeps the Postgres volume.
 
 Inside the Docker network, Fastify reaches `postgres:5432` and Next.js
 forwards `/graphql` to `redirect-service:3000`. The browser sees host ports;
-containers talk to each other by service name. The same service names are used
-in Kubernetes, so the built images work in both places.
+containers talk to each other by service name. The same internal service names
+are used in Kubernetes. The Kubernetes build sets a different public short-link
+address for the browser bundle.
 
 The Compose stack gives Fastify a Redis cache at `redis://redis:6379`.
 Successful redirect lookups are cached for 60 seconds. When a Redis read misses
@@ -62,26 +63,91 @@ With Colima running and `kind` and `kubectl` installed, run:
 
 ```sh
 pnpm k8s:up
-pnpm k8s:forward
 ```
 
-`k8s:up` builds the same images, loads them into the `shortlink` kind cluster,
-starts a separate Postgres with its own volume, waits for the migration Job,
-and deploys Fastify and Next.js. The kubeconfig stays in the ignored `.kind/`
-directory, so the commands do not switch your default Kubernetes context.
+Open [Shortlink](http://app.localhost:8080). Created short links use
+`http://go.localhost:8080/<code>`. These `.localhost` names resolve to loopback in
+modern browsers, so no hosts-file changes are needed.
 
-Keep `k8s:forward` running and open [Shortlink](http://127.0.0.1:3101).
-Stop the Compose stack first if it is using ports 3100 and 3101. Ctrl+C stops
-the port forwards; the cluster keeps running.
+`k8s:up` builds the application images, loads them into the `shortlink` kind cluster,
+starts a separate Postgres with its own volume, waits for the migration Job,
+and deploys Fastify, Next.js, and a Traefik Gateway. It then starts a background
+Docker TCP bridge on `127.0.0.1:8080`. You can close the terminal; no interactive
+port-forward is required. The kubeconfig stays in the ignored `.kind/` directory,
+so the commands do not switch your default Kubernetes context.
+
+The existing kind node was created without a Docker mapping for HTTP traffic.
+The bridge connects to its NodePort over Docker's `kind` network, preserving the
+cluster and its database. HAProxy forwards TCP bytes; Traefik performs the HTTP
+hostname routing inside Kubernetes. Both use pinned image versions.
+
+```mermaid
+flowchart LR
+  Browser --> Bridge["Mac :8080 → Docker TCP bridge"]
+  Bridge --> NodePort["kind node :30080"]
+  NodePort --> Gateway["Traefik Gateway :8080"]
+  Gateway -->|app.localhost| Web["web Service :3001 → Next.js"]
+  Gateway -->|go.localhost| API["redirect-service Service :3000 → Fastify"]
+  Web -->|/graphql rewrite| API
+  API --> Postgres
+```
+
+The Service boxes show routing references. Traefik discovers their pod endpoints
+and forwards requests to those pods; Next.js uses the internal API Service address.
+
+The [controller manifest](deploy/k8s/gateway-controller.yaml) installs Traefik
+and gives it permission to read routing resources and report their status.
+The [routing manifest](deploy/k8s/gateway.yaml) separates three concepts:
+
+- `GatewayClass` chooses the implementation: Traefik.
+- `Gateway` declares an HTTP listener and permits routes from the same namespace.
+- `HTTPRoute` selects the backend Service by hostname. Kubernetes Services still
+  provide stable internal destinations while their pods change.
+
+GraphQL stays on the UI's origin: the browser calls `app.localhost:8080/graphql`,
+and Next.js forwards to `http://redirect-service:3000/graphql` internally.
+The UI's generated short-link origin is compiled by Next.js, so `k8s:up` supplies
+`NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080` as a Docker build argument.
+Setting this variable only on a running web pod would not change its browser bundle.
+
+The first run downloads the pinned Gateway API v1.6.3 standard CRDs into `.kind/`.
+The CRDs define the Kubernetes resource types; the running controller makes those
+resources work. `k8s:up` waits for the controller, Gateway, and accepted routes,
+then checks both public hosts. To reconcile just the Gateway and bridge later:
+
+```sh
+pnpm k8s:gateway
+```
+
+To stop the local entrypoint while leaving Kubernetes and its data running:
+
+```sh
+pnpm k8s:gateway:down
+```
+
+Inspect the routing and its controller:
 
 ```sh
 kubectl --kubeconfig .kind/kubeconfig -n shortlink get pods,services,jobs,pvc
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get gatewayclass,gateway,httproute
+kubectl --kubeconfig .kind/kubeconfig -n shortlink logs deployment/gateway-controller
+docker compose -f deploy/kind/compose.yaml ps
 ```
 
 The [local manifests](deploy/k8s/) use a migration Job and separate Fastify
-readiness (`/readyz`) and liveness (`/healthz`) probes. A Gateway can replace
-port forwarding in a later deployment. The kind database is independent of
-the Compose database; deleting the kind cluster also deletes its local volume.
+readiness (`/readyz`) and liveness (`/healthz`) probes. The kind database is
+independent of the Compose database; deleting the kind cluster also deletes its
+local volume. This local Gateway uses HTTP on a loopback port. A deployed setup
+would give its Gateway a reachable load balancer and configure DNS and TLS.
+
+`pnpm k8s:forward` remains available for direct debugging on ports 3100 and 3101.
+Stop the Compose stack first if it occupies those ports. This optional command
+stays in the foreground and stops its forwards when you press Ctrl+C.
+
+Verified locally: existing database rows and PVC survived deployment; the browser
+created and copied a `go.localhost` link through GraphQL; visiting that link
+returned the correct `302`, `Location`, and `Cache-Control: no-store`. Missing
+codes and unmatched hostnames returned `404`. Gateway setup also passed a rerun.
 
 ## Run the services on the host for development
 
@@ -291,4 +357,6 @@ References: [Fastify app/server separation](https://fastify.dev/docs/latest/Guid
 [GraphQL Yoga with Fastify](https://the-guild.dev/graphql/yoga-server/docs/integrations/integration-with-fastify),
 [Next.js rewrites](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites),
 [Testcontainers on Colima](https://node.testcontainers.org/supported-container-runtimes/#colima),
+[Traefik Gateway API](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/gateway-api/),
+[kind host networking](https://kind.sigs.k8s.io/docs/user/quick-start/#mapping-ports-to-the-host-machine),
 [Postgres image configuration](https://hub.docker.com/_/postgres).

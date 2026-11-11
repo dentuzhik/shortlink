@@ -1,0 +1,140 @@
+# Traefik implements the standard Gateway API resources in gateway.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: shortlink-gateway
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses/status]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: shortlink-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: shortlink-gateway
+subjects:
+  - kind: ServiceAccount
+    name: gateway-controller
+    namespace: shortlink
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-controller
+rules:
+  - apiGroups: [""]
+    resources: [services, secrets, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources:
+      [
+        gateways,
+        httproutes,
+        grpcroutes,
+        tlsroutes,
+        referencegrants,
+        backendtlspolicies,
+      ]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources:
+      [
+        gateways/status,
+        httproutes/status,
+        grpcroutes/status,
+        tlsroutes/status,
+        referencegrants/status,
+        backendtlspolicies/status,
+      ]
+    verbs: [update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gateway-controller
+subjects:
+  - kind: ServiceAccount
+    name: gateway-controller
+    namespace: shortlink
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway-controller
+  template:
+    metadata:
+      labels:
+        app: gateway-controller
+    spec:
+      serviceAccountName: gateway-controller
+      containers:
+        - name: traefik
+          image: traefik:v3.7.18
+          args:
+            - --providers.kubernetesgateway=true
+            - --providers.kubernetesgateway.namespaces=shortlink
+            - --providers.kubernetesgateway.statusaddress.ip=127.0.0.1
+            - --entrypoints.web.address=:8080
+            - --entrypoints.health.address=:9000
+            - --ping=true
+            - --ping.entrypoint=health
+          ports:
+            - name: web
+              containerPort: 8080
+            - name: health
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: health
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: health
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 192Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-controller
+spec:
+  type: NodePort
+  selector:
+    app: gateway-controller
+  ports:
+    - name: web
+      port: 8080
+      targetPort: web
+      nodePort: 30080
