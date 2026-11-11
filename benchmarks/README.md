@@ -581,3 +581,97 @@ benchmark failed the correctness target because 2.70% of redirects received
 the full offered load. Compare this with the earlier unguarded 4,000/s trial,
 where redirect p99 was 152 ms and k6 dropped 4,491 starts. These are separate
 local runs, so the comparison includes run-to-run variation.
+
+### Continuous Redis outage and recovery
+
+```sh
+BENCH_REDIS_RECOVERY=1 BENCH_LATENCY_BUDGET=1 BENCH_REDIS=1 BENCH_HOST=1 \
+  BENCH_PORT=38175 BENCH_POOL_MAX=5 BENCH_VUS=400 \
+  BENCH_RATES='1000 3250' pnpm bench:redirect
+```
+
+Each rate runs one continuous 45-second k6 trial with 10 link creations/s.
+After priming the 1,000 fixture codes, the controller schedules 15 seconds of
+healthy Redis, 15 seconds with 75 ms of downstream response latency, then
+15 seconds after removing the fault. It uses the host clock shared with native
+k6 and logs the completion lag of each control command. A lag above 500 ms
+invalidates the trial. The runner stops after a failed rate.
+
+Each phase independently requires at least 99% correct redirects within 100 ms,
+successful link creations, and delivery of the offered load. Errors, including
+`503`, count as failed redirects. Zero dropped starts and the total request count
+are checked across the whole trial. Small per-phase count tolerances accommodate
+the k6 setup handoff. These 15-second transition checks supplement the agreed
+30-second steady-state performance target.
+
+For correct responses, the healthy phase must use Redis; the stable fault window
+(seconds 18–27) must use Postgres or a coalesced lookup; and the final five seconds
+must use Redis again. Redis `INFO commandstats` snapshots independently count
+actual `GET` commands during the stable fault window, where the breaker should
+allow roughly one recovery probe per second. Service logs must show the circuit
+opening during the fault and closing after restoration. The load stays on while
+the fault is added and removed.
+
+Recorded on November 11, 2026, using the same local Colima VM, five Postgres
+connections, and 400 redirect VUs:
+
+| Redirects/s | Phase    | Started redirects | Correct within 100 ms | Redirect p99 (ms) | `503` responses | Creation p99 (ms) |
+| ----------: | :------- | ----------------: | --------------------: | ----------------: | --------------: | ----------------: |
+|       1,000 | Healthy  |            14,999 |                  100% |                 4 |               0 |                 7 |
+|       1,000 | Delayed  |            15,000 |                  100% |                 5 |               0 |                 6 |
+|       1,000 | Recovery |            15,002 |                  100% |                 3 |               0 |                 6 |
+|       3,250 | Healthy  |            48,743 |                  100% |                 6 |               0 |             10.04 |
+|       3,250 | Delayed  |            48,750 |              99.9959% |                22 |               2 |             24.51 |
+|       3,250 | Recovery |            48,760 |                  100% |                 6 |               0 |             10.50 |
+
+Both initial completed trials passed every threshold, had zero dropped starts, and
+created 451 links successfully. The two rejected redirects at 3,250/s count
+against the delayed phase's correctness result. All other redirects met 100 ms.
+The fault raised latency while keeping it inside the target.
+
+The stable fault windows recorded nine Redis `GET`s each, over approximately
+9.10 seconds at 1,000/s and 9.07 seconds at 3,250/s. This is about one read/s while
+thousands of redirects/s continued through Postgres. Failed half-open probes
+reopened the circuit during the fault. After removing the delay, the circuit
+closed in approximately 0.41 and 0.47 seconds, respectively. Correct redirects
+in the final five seconds all came from Redis. Recovery-phase hit rates were
+97.23% and 97.03%; early recovery requests still used Postgres until a probe
+succeeded.
+
+The first 3,250/s attempt was discarded when fault injection took 280 ms and
+exceeded the controller's original 250 ms tolerance. The controller now resolves
+container IDs before the trial and uses direct `docker exec`, with a 500 ms
+timing tolerance. On the completed retry, fault addition/removal finished 68/71
+ms after their scheduled boundaries.
+
+The final combined command was repeated after adding completed-iteration
+thresholds, which prevent requests interrupted at the end of the test from
+disappearing from the result. The 1,000/s repeat passed every check: all redirects
+were correct within 100 ms, p99 was 3/4/2 ms across the three phases, and all
+451 creations succeeded. The 3,250/s repeat produced:
+
+| Phase    | Started redirects | Correct within 100 ms | Redirect p99 (ms) | `503` responses | Creation p99 (ms) | Cache hits |
+| :------- | ----------------: | --------------------: | ----------------: | --------------: | ----------------: | ---------: |
+| Healthy  |            48,748 |              99.3169% |                17 |             262 |             31.89 |     92.85% |
+| Delayed  |            48,750 |              99.8646% |                26 |              66 |             15.04 |      0.68% |
+| Recovery |            48,752 |                  100% |                 5 |               0 |              9.51 |     96.80% |
+
+This repeat met the latency/correctness target in every phase, completed the
+offered load with zero dropped starts, and created all 450 links successfully.
+It **failed the healthy-phase cache-source check**: the circuit opened at
++3.180 seconds, before the scheduled fault at +15 seconds, then closed at
++4.180 seconds. Opening requires five Redis read failures. The existing logs
+do not establish whether Redis latency, network delay, or an application/VM
+pause caused those failures. Correct fallback responses during this period
+violate the benchmark's all-cache-hit premise for its healthy phase.
+
+The repeat still recorded nine Redis `GET`s during each approximately nine-second
+stable fault window. The circuit closed at +30.429 seconds at 1,000/s and
++30.579 seconds at 3,250/s; fault removal completed at +30.047 and +30.071 seconds.
+The final five seconds used Redis for every correct redirect at both rates.
+
+Keep the early trip as a finding to investigate before tuning the 25 ms Redis
+timeout or the breaker's five-failure threshold. These runs demonstrate recovery
+and bounded reads during the injected delay, while showing variation before
+the fault at 3,250/s. They do not establish a higher throughput ceiling or
+guarantee zero service degradation.

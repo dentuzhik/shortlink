@@ -7,6 +7,7 @@ redis_runner=${BENCH_REDIS:-0}
 hot_key_runner=${BENCH_HOT_KEY:-0}
 spike_runner=${BENCH_HOT_SPIKE:-0}
 budget_runner=${BENCH_LATENCY_BUDGET:-0}
+recovery_runner=${BENCH_REDIS_RECOVERY:-0}
 expiry_at_ms=0
 spike_at_ms=0
 unset POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
@@ -28,6 +29,11 @@ fi
 
 if [ "$budget_runner" = 1 ] && { [ "$redis_runner" != 1 ] || [ "$host_runner" != 1 ] || [ "$hot_key_runner" = 1 ]; }; then
   printf 'BENCH_LATENCY_BUDGET=1 requires BENCH_REDIS=1 BENCH_HOST=1 and a spread of codes.\n' >&2
+  exit 1
+fi
+
+if [ "$recovery_runner" = 1 ] && [ "$budget_runner" != 1 ]; then
+  printf 'BENCH_REDIS_RECOVERY=1 requires BENCH_LATENCY_BUDGET=1.\n' >&2
   exit 1
 fi
 
@@ -165,6 +171,16 @@ run_latency_budget() {
   done
 }
 
+run_redis_recovery() {
+  for recovery_rate in ${BENCH_RATES:-1000}; do
+    redis_cli FLUSHDB >/dev/null
+    printf '\nPriming Redis through the 1,000 fixture redirects\n'
+    stage 20 15 redis-prime
+    test "$(redis_cli DBSIZE)" -eq 1000
+    node benchmarks/redis-recovery.mjs "$project" "$benchmark_url" "$recovery_rate" || return 1
+  done
+}
+
 measure_hot_key() {
   hot_key=shortlink:redirect:00000001
   stats_before=$(redis_cli INFO stats)
@@ -213,6 +229,10 @@ if [ "$redis_runner" = 1 ]; then
     set_host_target
   fi
   if [ "$budget_runner" = 1 ]; then
+    if [ "$recovery_runner" = 1 ]; then
+      run_redis_recovery
+      exit "$?"
+    fi
     run_latency_budget
     exit "$status"
   fi
