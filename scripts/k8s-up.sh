@@ -14,6 +14,7 @@ docker compose build redirect-service
 # NEXT_PUBLIC_* values are compiled into the browser bundle by Next.js.
 docker compose build --build-arg NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080 web
 docker image inspect postgres:18.6 >/dev/null 2>&1 || docker pull postgres:18.6
+docker image inspect redis:8.10.3-alpine >/dev/null 2>&1 || docker pull redis:8.10.3-alpine
 clusters=$(kind get clusters)
 if printf '%s\n' "$clusters" | grep -Fxq "$cluster"; then
   kind export kubeconfig --name "$cluster" --kubeconfig "$kubeconfig"
@@ -25,7 +26,7 @@ architecture=$(kube get node "$cluster-control-plane" -o jsonpath='{.status.node
 image_archive=$(mktemp "${TMPDIR:-/tmp}/shortlink-images.XXXXXX")
 trap 'rm -f "$image_archive"' EXIT
 docker image save --platform "linux/$architecture" --output "$image_archive" \
-  shortlink-redirect:local shortlink-web:local postgres:18.6
+  shortlink-redirect:local shortlink-web:local postgres:18.6 redis:8.10.3-alpine
 kind load image-archive --name "$cluster" "$image_archive"
 
 kube apply -f deploy/k8s/namespace.yaml
@@ -33,6 +34,8 @@ kube create secret generic postgres-credentials \
   --from-env-file=deploy/k8s/.env.example --dry-run=client -o yaml | kube apply -f -
 kube apply -f deploy/k8s/postgres.yaml
 kube rollout status deployment/postgres --timeout=120s
+kube apply -f deploy/k8s/redis.yaml
+kube rollout status deployment/redis --timeout=120s
 
 kube delete job db-migrate --ignore-not-found
 kube apply -f deploy/k8s/migration.yaml

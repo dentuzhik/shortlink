@@ -70,7 +70,7 @@ Open [Shortlink](http://app.localhost:8080). Created short links use
 modern browsers, so no hosts-file changes are needed.
 
 `k8s:up` builds the application images, loads them into the `shortlink` kind cluster,
-starts a separate Postgres with its own volume, waits for the migration Job,
+starts a separate Postgres with its own volume and a disposable Redis cache, waits for the migration Job,
 and deploys Fastify, Next.js, and a Traefik Gateway. It then starts a background
 Docker TCP bridge on `127.0.0.1:8080`. You can close the terminal; no interactive
 port-forward is required. The kubeconfig stays in the ignored `.kind/` directory,
@@ -90,11 +90,62 @@ flowchart LR
   Gateway -->|app.localhost| Web["web Service :3001 → Next.js"]
   Gateway -->|go.localhost| API["redirect-service Service :3000 → Fastify"]
   Web -->|/graphql rewrite| API
+  API -->|cache lookup| Redis["redis Service :6379 → Redis"]
   API --> Postgres
 ```
 
 The Service boxes show routing references. Traefik discovers their pod endpoints
 and forwards requests to those pods; Next.js uses the internal API Service address.
+
+Fastify connects to `redis://redis:6379` through the internal Redis Service. Redis
+has no Gateway route or host port. It uses the same image and cache implementation
+as Compose: a successful lookup fills the cache for 60 seconds, and an unavailable
+cache falls back to Postgres. Fastify readiness still checks Postgres only.
+`k8s:up` waits for Redis on startup to catch deployment problems; that startup
+check does not make Redis a runtime requirement for serving redirects.
+
+The [Redis manifest](deploy/k8s/redis.yaml) runs one replica without a PVC, RDB
+snapshots, or AOF persistence. Replacing that pod clears the cache; links remain
+in Postgres and repopulate Redis on subsequent visits. `Recreate` rollouts avoid
+temporarily routing to two independent caches. The 128 MiB container memory limit
+is a local resource guard, not a Redis eviction policy or a measured cache capacity.
+
+The local Fastify Deployment enables `REDIS_CACHE_HEADER=1`. To inspect a link
+created through the UI, run this twice, replacing `<code>`:
+
+```sh
+curl --resolve go.localhost:8080:127.0.0.1 -sS -D - -o /dev/null \
+  'http://go.localhost:8080/<code>'
+```
+
+The first visit to an uncached link returns the redirect from Postgres and fills
+Redis, without an `X-Cache` header. A subsequent visit within its TTL returns
+`X-Cache: HIT`. Both responses retain `Cache-Control: no-store`, which controls
+browser caching independently of the server's Redis cache. A visit sharing an
+in-flight lookup can instead report `X-Cache: COALESCED`.
+
+Inspect Redis inside the cluster, without exposing a new port:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get pods,services -l app=redis
+kubectl --kubeconfig .kind/kubeconfig -n shortlink exec deployment/redis -- redis-cli ping
+kubectl --kubeconfig .kind/kubeconfig -n shortlink exec deployment/redis -- \
+  redis-cli TTL 'shortlink:redirect:<code>'
+```
+
+TTL reports remaining seconds, or `-2` if the key is absent. Existing Grafana
+panels still show HTTP latency and database-pool state; cache hit/miss counters
+and Redis-specific panels have not been added in this increment.
+
+Verified through the Gateway on November 12, 2026: cold lookup → cache fill →
+`X-Cache: HIT`, correct destination and `no-store` throughout, and a 60-second TTL.
+With the Redis Deployment temporarily scaled to zero, redirects still returned
+`302` and `/readyz` returned `200`. Restoring its replica produced an empty cache;
+the link remained in Postgres, refilled Redis, and returned a cache hit again.
+A missing code returned `404` and was not cached. These are functional smoke
+checks, not a latency or throughput qualification. The full `k8s:up` also passed;
+image builds caused temporary readiness timeouts in the shared Colima VM before
+the stack recovered.
 
 The [controller manifest](deploy/k8s/gateway-controller.yaml) installs Traefik
 and gives it permission to read routing resources and report their status.

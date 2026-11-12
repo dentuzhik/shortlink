@@ -27,6 +27,11 @@ spec:
           env:
             - name: POSTGRES_HOST
               value: postgres
+            - name: REDIS_URL
+              value: redis://redis:6379
+            # Local diagnostics: cache hits are visible through the Gateway.
+            - name: REDIS_CACHE_HEADER
+              value: "1"
           readinessProbe:
             httpGet:
               path: /readyz
