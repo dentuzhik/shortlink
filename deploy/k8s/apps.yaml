@@ -17,10 +17,17 @@ spec:
       labels:
         app: redirect-service
     spec:
+      # Includes the routing handoff wait and Fastify's graceful shutdown.
+      terminationGracePeriodSeconds: 30
       containers:
         - name: api
           image: shortlink-redirect:local
           imagePullPolicy: Never
+          lifecycle:
+            preStop:
+              # Keep serving while terminating endpoints leave Gateway routing.
+              sleep:
+                seconds: 5
           ports:
             - name: http
               containerPort: 3000

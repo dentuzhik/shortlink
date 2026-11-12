@@ -558,8 +558,28 @@ The Deployment declares `maxUnavailable: 0` and `maxSurge: 1`. Kubernetes can
 start one extra non-terminating pod while preserving two available replicas.
 Terminating pods can briefly add to the physical count. Fastify's existing
 `SIGTERM` handler calls `app.close()`; the container entrypoint uses `exec`, so
-Node receives that signal. This test initially adds no shutdown delay or retry
-middleware: it measures the existing handoff behavior.
+Node receives that signal. The initial trials below used that shutdown handler
+without a routing drain wait.
+
+The current Fastify pod template adds a native Kubernetes `preStop.sleep` hook
+of **five seconds** and explicitly keeps `terminationGracePeriodSeconds: 30`.
+The kubelet waits before sending `SIGTERM`; it does not suspend the Node.js
+process. Fastify keeps serving requests while Kubernetes marks the endpoint as
+terminating/unready and Traefik updates routing. After the hook completes,
+Fastify's existing shutdown handler finishes accepted requests and closes its
+pool and Redis client. The 30-second allowance includes both phases, leaving up
+to 25 seconds after the hook. `/readyz` continues checking Postgres; terminating
+endpoints become unready for regular routing independently of that probe.
+
+Five seconds is an initial measured-test candidate: the previous 4-GiB run's
+failed requests began across roughly a two-second handoff interval. This gives
+local propagation headroom, but it is not an acknowledgement from Traefik or a
+universal production setting. Validate it with the same correctness and latency
+checks; a sufficiently long routing delay can still exceed a fixed wait. The
+hook applies to replacement pods, so the setup rollout must complete before
+testing a restart of pods that actually contain it. This uses the existing image
+and requires no Fastify code or image rebuild. See the Kubernetes
+[lifecycle hook execution rules](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution).
 
 The strict correctness goal is zero wrong destinations, connection errors, or
 unexpected statuses, plus `Cache-Control: no-store` on every redirect. k6 must
@@ -577,6 +597,13 @@ shutdown logs, Kubernetes events, and run metadata beneath
 and its fixed dashboard time window. A failed threshold exits nonzero while
 preserving the diagnostics; the runner does not roll back or alter the shutdown
 implementation automatically.
+
+Run metadata includes the configured lifecycle hook and total termination grace
+period. Timeline snapshots include each pod's deletion timestamp and grace
+period; the deletion timestamp is a deadline, not necessarily the start of the
+hook. These fields and the `SIGTERM` logs help verify the delay independently of
+the client result. Kubernetes can report rollout completion while old terminating
+pods are still draining, so that duration does not by itself measure all cleanup.
 
 In Grafana, old pod series end and two replacement names appear. Their counters
 and pools start fresh, while Redis remains shared. Three serving pods may briefly
@@ -659,6 +686,39 @@ logs, events, and the pod/endpoint timeline. The resource report includes a fixe
 dashboard time window. Both replacements were ready and `/readyz` returned `200`
 afterward. Further shutdown coordination work remains before claiming a
 zero-error restart at this load.
+
+The next trial enabled the **5-second `preStop.sleep` hook**, keeping the same
+2-CPU / 4-GiB VM, image, k6 scenario, and thresholds. It **passed**:
+
+| Measurement                          | Before drain wait | With 5s drain wait |
+| :----------------------------------- | ----------------: | -----------------: |
+| Correct redirects                    |     8,890 / 8,973 |      9,001 / 9,001 |
+| Failed visits                        |                83 |                  0 |
+| Dropped starts                       |                27 |                  0 |
+| Restart-window client p99            |          3,001 ms |               5 ms |
+| Maximum client duration across trial |          3,004 ms |              17 ms |
+
+Every redirect was correct within 100ms in each reporting window. Both
+replacement pods were ready with zero container restarts afterward. The old
+pods received `SIGTERM` 4.55s and 5.03s after their first observed terminating
+sample; the one-second snapshots introduce observation uncertainty. Their logs
+recorded **51 and 36 successful redirect completions** after endpoint withdrawal
+was observed and before `SIGTERM`. Neither old pod logged a closing refusal.
+This confirms that Fastify remained available during the wait rather than being
+paused, and late routing/in-flight work completed successfully in this trial.
+
+The controller reported rollout completion in 4.69s, while the last old-pod
+`SIGTERM` arrived 9.76s after the restart request: rollout status can finish
+before terminating processes complete their drain. Sampled availability and
+ready endpoints stayed at least two. VM available memory stayed above 1.93 GiB;
+memory PSI full stalls stayed below 0.035%, with no additional restarts in the
+surviving `shortlink` containers. These readings and the unchanged client checks
+validate this local 100-redirects/s trial, not an arbitrary load or environment.
+
+Artifacts are in `.kind/rolling-restart/2026-11-12T11-42-07-664Z/`, including
+`drain-evidence.json`, the k6 summary, raw shutdown logs, resource history and
+dashboard time windows. The five-second wait remains a measured local candidate
+to revisit when the traffic profile or deployment topology changes.
 
 ## Run the services on the host for development
 

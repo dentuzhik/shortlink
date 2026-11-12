@@ -42,6 +42,9 @@ const report = {
   durationSeconds: 90,
   phases: { baselineSeconds: 20, restartWindowSeconds: 40, afterSeconds: 30 },
   image: deployment.spec.template.spec.containers[0].image,
+  lifecycle: deployment.spec.template.spec.containers[0].lifecycle ?? null,
+  terminationGracePeriodSeconds:
+    deployment.spec.template.spec.terminationGracePeriodSeconds ?? 30,
 };
 const timeline = createWriteStream(`${runDir}/timeline.ndjson`);
 const samples = [];
@@ -62,6 +65,8 @@ async function snapshot() {
           condition.type === "Ready" && condition.status === "True",
       ),
       terminating: Boolean(pod.metadata.deletionTimestamp),
+      deletionTimestamp: pod.metadata.deletionTimestamp,
+      deletionGracePeriodSeconds: pod.metadata.deletionGracePeriodSeconds,
       phase: pod.status.phase,
     }));
   const current = resources.find(
