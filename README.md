@@ -351,6 +351,39 @@ responses in current pods, and database-pool state. Its 30-second rate windows
 smooth and lag the load stages. Histogram percentiles are estimates; the client
 latency target still needs client measurements.
 
+The **Overview** combines all Fastify pods. **Pods (details)** filters the lower
+section, which shows current scrape health, scrape history, redirect traffic and
+p99 latency, pool clients and waiting checkouts, and `5xx` rates per pod. Select
+one pod to inspect it or **All** to compare replicas; the overview remains global.
+Current scrape health uses an instant query, while history charts use range
+queries. The selector includes pod names observed within the chosen time range.
+A chart can therefore have three colors after a replacement even when only two
+pods run now. A replaced pod's historical series remains until it falls outside
+the selected time range or Prometheus retention.
+
+**Scrape targets up** and **Failed scrapes** count currently discovered targets.
+They do not compare against the Deployment's desired replica count. A removed
+target disappears from discovery; it does not stay present as a failed scrape.
+Likewise, `UP` means the metrics listener answered, not that `/readyz` passes or
+redirects work end to end. This dashboard adds no Kubernetes readiness collector
+or synthetic availability probe. Pod p99 values preserve the `pod` and `le`
+labels when combining histogram buckets; they are not averages of percentiles.
+
+For dashboard-only changes, update the mounted ConfigMap without restarting
+Prometheus or Grafana:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig --context kind-shortlink -n shortlink \
+  create configmap grafana-dashboards \
+  --from-file=shortlink.json=deploy/monitoring/shortlink.json \
+  --dry-run=client -o yaml | \
+  kubectl --kubeconfig .kind/kubeconfig --context kind-shortlink -n shortlink apply -f -
+```
+
+Allow time for Kubernetes to refresh the mounted ConfigMap and Grafana's
+10-second provisioning poll, then reload the dashboard. `pnpm monitoring:up`
+remains the command to reconcile the complete monitoring setup.
+
 Run the demonstration load:
 
 ```sh

@@ -1,11 +1,11 @@
 {
   "uid": "shortlink-overview",
   "title": "Shortlink overview",
-  "description": "Local HTTP traffic and Postgres pool metrics from the redirect service.",
+  "description": "Combined Fastify metrics and per-pod diagnostics. Scrape health is separate from application readiness.",
   "tags": ["shortlink", "local"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "5s",
   "time": {
     "from": "now-15m",
@@ -14,12 +14,25 @@
   "editable": false,
   "panels": [
     {
-      "id": 1,
-      "title": "Fastify scrape",
-      "type": "stat",
+      "id": 20,
+      "title": "Overview · all Fastify pods",
+      "type": "row",
+      "collapsed": false,
       "gridPos": {
         "x": 0,
         "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 1,
+      "title": "Scrape targets up",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
         "w": 4,
         "h": 4
       },
@@ -27,22 +40,24 @@
         "type": "prometheus",
         "uid": "shortlink-prometheus"
       },
-      "description": "Prometheus target health. One means the metrics endpoint can be scraped.",
+      "description": "Current count of successful Fastify scrapes across all discovered targets. This is not Kubernetes readiness, the desired replica count, or an end-to-end availability measurement. A removed target disappears from discovery.",
       "targets": [
         {
           "refId": "A",
-          "expr": "min(up{job=\"redirect-service\"})",
-          "legendFormat": "Scrape",
+          "expr": "sum(up{job=\"redirect-service\"}) or vector(0)",
+          "legendFormat": "Targets up",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "decimals": 2,
+          "decimals": 0,
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "thresholds": {
             "mode": "absolute",
@@ -57,21 +72,7 @@
               }
             ]
           },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "DOWN",
-                  "color": "red"
-                },
-                "1": {
-                  "text": "UP",
-                  "color": "green"
-                }
-              }
-            }
-          ]
+          "mappings": []
         },
         "overrides": []
       },
@@ -82,19 +83,79 @@
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Failed scrapes",
+      "type": "stat",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Current discovered targets whose latest scrape failed. Targets removed from discovery are absent, so zero does not prove the desired number of replicas exists.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(up{job=\"redirect-service\"} == 0) or vector(0)",
+          "legendFormat": "Failed",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto"
       }
     },
     {
       "id": 2,
-      "title": "Redirect requests / s",
+      "title": "Redirects / s",
       "type": "stat",
       "gridPos": {
-        "x": 4,
-        "y": 0,
-        "w": 5,
+        "x": 8,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "datasource": {
@@ -144,12 +205,12 @@
     },
     {
       "id": 3,
-      "title": "HTTP 5xx total \u00b7 current pods",
+      "title": "5xx · current pods",
       "type": "stat",
       "gridPos": {
-        "x": 9,
-        "y": 0,
-        "w": 5,
+        "x": 12,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "datasource": {
@@ -203,12 +264,12 @@
     },
     {
       "id": 4,
-      "title": "Waiting pool checkouts",
+      "title": "Waiting checkouts",
       "type": "stat",
       "gridPos": {
-        "x": 14,
-        "y": 0,
-        "w": 5,
+        "x": 16,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "datasource": {
@@ -258,26 +319,27 @@
     },
     {
       "id": 5,
-      "title": "Redirect p99 \u00b7 server",
+      "title": "Redirect p99 · server",
       "type": "stat",
       "gridPos": {
-        "x": 19,
-        "y": 0,
-        "w": 5,
+        "x": 20,
+        "y": 1,
+        "w": 4,
         "h": 4
       },
       "datasource": {
         "type": "prometheus",
         "uid": "shortlink-prometheus"
       },
-      "description": "Histogram estimate of Fastify duration. This excludes Gateway/client overhead and does not prove the client latency target.",
+      "description": "Histogram estimate of Fastify duration. This excludes Gateway/client overhead and does not prove the client latency target. Current 30-second window only; no recent requests means no percentile.",
       "targets": [
         {
           "refId": "A",
           "expr": "1000 * histogram_quantile(0.99, sum by (le) (rate(shortlink_http_request_duration_seconds_bucket{job=\"redirect-service\",route=\"/:code\",method=\"GET\"}[30s])))",
           "legendFormat": "p99",
           "editorMode": "code",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -295,18 +357,30 @@
                 "value": null
               }
             ]
-          }
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "No recent traffic"
+                }
+              }
+            }
+          ],
+          "noValue": "No recent traffic"
         },
         "overrides": []
       },
       "options": {
         "reduceOptions": {
-          "calcs": ["lastNotNull"],
+          "calcs": ["last"],
           "fields": "",
           "values": false
         },
         "colorMode": "value",
-        "graphMode": "area",
+        "graphMode": "none",
         "justifyMode": "auto",
         "textMode": "auto"
       }
@@ -317,7 +391,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 5,
         "w": 12,
         "h": 8
       },
@@ -369,11 +443,11 @@
     },
     {
       "id": 7,
-      "title": "Redirect latency \u00b7 server",
+      "title": "Redirect latency · server",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 4,
+        "y": 5,
         "w": 12,
         "h": 8
       },
@@ -453,7 +527,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 13,
         "w": 12,
         "h": 8
       },
@@ -509,7 +583,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 13,
         "w": 6,
         "h": 8
       },
@@ -565,7 +639,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 18,
-        "y": 12,
+        "y": 13,
         "w": 6,
         "h": 8
       },
@@ -616,19 +690,525 @@
       }
     },
     {
+      "id": 21,
+      "title": "Per-pod diagnostics · filtered by Pods (details)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "Current scrape health by pod",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Instant query: only currently discovered selected targets. UP means the metrics listener responded, not that /readyz or redirects work. Replaced pods appear in history, not here.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"redirect-service\",pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "textMode": "value_and_name",
+        "wideLayout": false,
+        "text": {
+          "titleSize": 12,
+          "valueSize": 28
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Scrape history by pod",
+      "type": "state-timeline",
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "One row per selected pod observed in the time range. Replacements create new pod names and rows. Gaps mean no sample; disappearing from discovery is not a recorded DOWN value. Scrape health is not application readiness.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"redirect-service\",pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 80,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "center",
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Redirect requests / s by pod",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Completed redirects and other responses on GET /:code, grouped by selected pod. Thirty-second windows smooth traffic. A newly started pod needs counter samples before rate() can estimate traffic.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(shortlink_http_requests_total{job=\"redirect-service\",pod=~\"$pod\",route=\"/:code\",method=\"GET\"}[30s]))",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Redirect p99 by pod · server",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Each pod gets its own histogram-derived p99, preserving both pod and le while aggregating buckets. No traffic means no percentile. This is Fastify time, not client latency; 100ms is a reference line.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1000 * histogram_quantile(0.99, sum by (pod, le) (rate(shortlink_http_request_duration_seconds_bucket{job=\"redirect-service\",pod=~\"$pod\",route=\"/:code\",method=\"GET\"}[30s])))",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 2,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            },
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "Pool clients by pod and state",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Independent Postgres pools, maximum five clients per process. in_use includes clients still connecting; it is not a count of active SQL queries.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "shortlink_db_pool_connections{job=\"redirect-service\",pod=~\"$pod\"}",
+          "legendFormat": "{{pod}} · {{state}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Waiting pool checkouts by pod",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 36,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Per-pod pg pool queue snapshots at scrape time. A five-second scrape can miss short queue spikes.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "shortlink_db_pool_waiting_requests{job=\"redirect-service\",pod=~\"$pod\"}",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "title": "HTTP 5xx / s by pod",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "description": "Thirty-second error rates per selected pod. A healthy scrape with no 5xx rate series is shown as zero. The first event of a new counter series cannot be inferred by rate() before its baseline; the overview cumulative error stat also shows that first event.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (pod) (rate(shortlink_http_requests_total{job=\"redirect-service\",pod=~\"$pod\",status_code=~\"5..\"}[30s])) or on (pod) (0 * (up{job=\"redirect-service\",pod=~\"$pod\"} == 1))",
+          "legendFormat": "{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "id": 11,
       "title": "Reading this dashboard",
       "type": "text",
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 51,
         "w": 24,
-        "h": 5
+        "h": 8
       },
       "options": {
         "mode": "markdown",
-        "content": "Run **`pnpm load:demo`** to generate a 100 \u2192 500 \u2192 1,000 \u2192 100 redirects/s profile, plus one GraphQL link creation/s. Five percent of visits deliberately request missing codes.\n\nPrometheus scrapes individual pods every **5 seconds**. Rates and percentile estimates use **30-second windows**, so charts smooth and lag the load stages. Durations here are **Fastify server time**, not browser or k6 time. Pool gauges are snapshots. HTTP `200` may still contain GraphQL errors.\n\nThe dashboard and datasource are provisioned from repository files. Prometheus retains local history for up to **24 hours / 256 MB**."
+        "content": "**Overview** combines all Fastify pods. **Pods (details)** filters only the per-pod section; choose one, several, or All. The selector includes pods observed in the selected time range. A one-hour chart may contain three pod names even when only two pods run now: the third is a replaced pod's history. Current scrape health uses an instant query; history uses a range query.\n\n**UP means the metrics endpoint can be scraped.** It does not prove application readiness or a correct redirect. Target counts do not track desired Kubernetes replicas: a removed target disappears rather than staying DOWN. Kubernetes readiness and end-to-end checks are separate signals.\n\nRun **`pnpm load:demo`** for 100 → 500 → 1,000 → 100 redirects/s, plus one GraphQL creation/s. Five percent deliberately request missing codes. Prometheus scrapes every **5 seconds**; rates and histogram percentiles use **30-second windows**. Quiet periods have no meaningful latency percentile, and new counters need baseline samples. The latency reference is **100 ms of server time**; our performance target uses client measurements. Pool gauges can miss short spikes. HTTP `200` may contain GraphQL errors.\n\nDashboard and datasource are provisioned from repository files. Local history is retained for up to **24 hours / 256 MB**."
       }
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "pod",
+        "label": "Pods (details)",
+        "type": "query",
+        "description": "Filters only the per-pod section. Includes pods observed in the selected time range, including replaced pods. All includes historical pod series.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "shortlink-prometheus"
+        },
+        "definition": "query_result(count_over_time(up{job=\"redirect-service\"}[${__range_s}s]))",
+        "query": {
+          "query": "query_result(count_over_time(up{job=\"redirect-service\"}[${__range_s}s]))",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false,
+        "regex": "/pod=\"([^\"]+)\"/"
+      }
+    ]
+  }
 }
