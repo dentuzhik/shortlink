@@ -6,6 +6,18 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+const redirectRate = Number(process.env.RATE ?? 1000);
+const createRate = Number(process.env.CREATE_RATE ?? 10);
+if (
+  !Number.isSafeInteger(redirectRate) ||
+  redirectRate < 1 ||
+  !Number.isSafeInteger(createRate) ||
+  createRate < 0
+) {
+  throw new Error(
+    "RATE must be a positive integer; CREATE_RATE must be nonnegative",
+  );
+}
 const kubeArgs = [
   "--kubeconfig",
   ".kind/kubeconfig",
@@ -38,7 +50,8 @@ await mkdir(runDir, { recursive: true });
 const report = {
   createdAt: Date.now(),
   runDir,
-  rate: 100,
+  rate: redirectRate,
+  createRate,
   durationSeconds: 90,
   phases: { baselineSeconds: 20, restartWindowSeconds: 40, afterSeconds: 30 },
   image: deployment.spec.template.spec.containers[0].image,
@@ -155,6 +168,10 @@ const args = nativeRunner
       `${runDir}/summary.json`,
       "-e",
       "BASE_URL=http://127.0.0.1:8080",
+      "-e",
+      `RATE=${redirectRate}`,
+      "-e",
+      `CREATE_RATE=${createRate}`,
       "benchmarks/rolling-restart.js",
     ]
   : [
@@ -180,12 +197,16 @@ const args = nativeRunner
       "/results/summary.json",
       "-e",
       "BASE_URL=http://shortlink-edge-bridge-1:8080",
+      "-e",
+      `RATE=${redirectRate}`,
+      "-e",
+      `CREATE_RATE=${createRate}`,
       "/benchmarks/rolling-restart.js",
     ];
 report.runner = nativeRunner ? "native" : "docker (shares the Colima VM)";
 console.log(`Artifacts: ${runDir}\nRunner: ${report.runner}`);
 console.log(
-  "100 redirects/s for 90s; requesting a Fastify rolling restart after 20s.",
+  `${redirectRate} redirects/s + ${createRate} creations/s for 90s; requesting a Fastify rolling restart after 20s.`,
 );
 const child = spawn(command, args, {
   env: { ...process.env, K6_NO_USAGE_REPORT: "true" },
@@ -213,7 +234,9 @@ for (const stream of [child.stdout, child.stderr]) {
         ready();
       }
       const warning =
-        line.includes("Request Failed") || line.includes("REDIRECT_FAILURE");
+        line.includes("Request Failed") ||
+        line.includes("REDIRECT_FAILURE") ||
+        line.includes("CREATION_FAILURE");
       if (!warning || ++warningLines <= 5) process.stdout.write(`${line}\n`);
     }
   });
@@ -336,6 +359,9 @@ try {
       await readFile(`${runDir}/summary.json`, "utf8"),
     );
     console.log("Redirect metrics:", summary.metrics.redirect_correct);
+    if (createRate > 0) {
+      console.log("Creation metrics:", summary.metrics.link_creation_correct);
+    }
   } catch {
     console.error("No k6 summary was produced; inspect k6.log.");
   }

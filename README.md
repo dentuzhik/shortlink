@@ -545,14 +545,24 @@ kubectl --kubeconfig .kind/kubeconfig --context kind-shortlink -n shortlink \
 pnpm test:rolling-restart
 ```
 
-This deliberately replaces **both Fastify pods** while k6 sends **100 redirects/s
-for 90 seconds through the Gateway**. It creates ten fixture links, warms them,
-collects a 20-second baseline, requests a rolling restart, and continues traffic.
+This deliberately replaces **both Fastify pods** while k6 sends **1,000 redirects/s
+plus 10 link creations/s for 90 seconds through the Gateway**. The two independent
+arrival-rate scenarios continue scheduling requests even when responses slow
+down. It creates ten fixture links, warms them, collects a 20-second baseline,
+requests a rolling restart, and continues traffic.
 The fixed reporting windows are baseline (0–20s), restart window (20–60s), and
 after (60–90s); actual restart and rollout completion timestamps are recorded
 separately. A rollout taking more than the 40-second restart window fails the
 test. Redis and Postgres keep running; Redis's normal 60-second TTL still applies.
-The fixture rows remain in the local database.
+The fixture rows and links created under load remain in the local database.
+This exercises ten hot redirect keys with healthy Redis, including normal TTL
+expiry; it does not simulate Redis read timeouts or a broad distribution of codes.
+
+To repeat the earlier redirect-only comparison instead, run:
+
+```sh
+RATE=100 CREATE_RATE=0 pnpm test:rolling-restart
+```
 
 The Deployment declares `maxUnavailable: 0` and `maxSurge: 1`. Kubernetes can
 start one extra non-terminating pod while preserving two available replicas.
@@ -583,11 +593,22 @@ and requires no Fastify code or image rebuild. See the Kubernetes
 
 The strict correctness goal is zero wrong destinations, connection errors, or
 unexpected statuses, plus `Cache-Control: no-store` on every redirect. k6 must
-drop no scheduled iterations, execute at least 8,999 visits, and complete at least
-99% correctly within 100ms both overall and in each reporting window. The runner
+drop no scheduled iterations, execute at least `RATE * 90 - 1` visits, and complete
+at least 99% correctly within 100ms both overall and in each reporting window.
+When `CREATE_RATE` is positive, it must also execute at least
+`CREATE_RATE * 90 - 1` creations, all returning `201` with the expected destination
+and an eight-character code. Creation correctness and latency are reported by
+phase, without imposing a separate creation latency target. The runner
 also checks that both old pods were replaced, the rollout completed, and sampled
-Deployment availability stayed at two. This is a restart check at moderate load,
-not qualification of the separate 1,000 redirects/s + 10 creations/s target.
+Deployment availability stayed at two. The initial trials below used 100
+redirects/s without concurrent creations; the default now checks the higher
+mixed workload using the same drain policy and restart timing.
+
+k6 preallocates its existing ceilings of 350 redirect workers and 50 creation
+workers before traffic starts. This avoids worker initialization during a brief
+latency spike; it does not raise the previous worker limits. Both scenarios
+still fail on any dropped start. Failure logs include a bounded response body to
+distinguish application protection from shutdown or Gateway errors.
 
 The runner uses native `k6` from `PATH`, or the executable specified by `K6_BIN`.
 Otherwise it uses the pinned Docker k6 image, sharing Colima's resources. It saves
@@ -719,6 +740,67 @@ Artifacts are in `.kind/rolling-restart/2026-11-12T11-42-07-664Z/`, including
 `drain-evidence.json`, the k6 summary, raw shutdown logs, resource history and
 dashboard time windows. The five-second wait remains a measured local candidate
 to revisit when the traffic profile or deployment topology changes.
+
+### Higher-traffic restart trials
+
+Two subsequent 90-second trials kept the same 2-CPU / 4-GiB VM, two replicas,
+image, five-second drain and restart timing, while raising traffic to **1,000
+redirects/s plus 10 link creations/s**. Both met the target of at least 99% correct
+redirects within 100ms overall and in every phase, but **both failed the stricter
+zero-error continuity test**:
+
+| Measurement                         | Initial mixed run | Preallocated-worker follow-up |
+| :---------------------------------- | ----------------: | ----------------------------: |
+| Redirect visits                     |            89,996 |                        90,001 |
+| Correct redirects                   |            89,993 |                        89,982 |
+| Application `503` responses         |                 3 |                            19 |
+| Dropped starts                      |                 5 |                             0 |
+| Successful link creations           |         901 / 901 |                     901 / 901 |
+| Restart-window redirect client p99  |             15 ms |                         27 ms |
+| Maximum redirect client duration    |            105 ms |                        128 ms |
+| Overall correct redirects <= 100 ms |           99.996% |                       99.969% |
+
+The initial run allocated 50 redirect workers and 20 creation workers up front,
+with ceilings of 350 and 50. k6 grew its worker pool during the trial and dropped
+five starts. The follow-up allocated those same ceilings before traffic began;
+it dropped no starts. This removes runtime worker initialization as a source of
+those follow-up drops, without establishing the precise cause of the initial
+drops or eliminating application errors.
+
+In the follow-up, the baseline had 19,983 correct redirects, the restart window
+had 39,986 correct redirects, and the after window had 30,013 correct redirects
+out of 30,032. The correct-within-100ms fractions were 100%, 99.990% and 99.920%,
+respectively. All creations succeeded in each phase; restart-window creation
+client p99 was 31ms. No creation latency target was added.
+
+The first run's three `503`s were logged by an old pod before endpoint withdrawal
+or `SIGTERM`. In the follow-up, all 19 failures started in a burst approximately
+74.8 seconds into the trial, after the old pods had received `SIGTERM` at about
+29.2s and 33.2s. Every captured body was
+`{"error":"Redirect temporarily unavailable"}`, identifying the application's
+Postgres checkout protection. Prometheus attributed all 19 to replacement pod
+`redirect-service-7b67bbfd45-xkrbr`. The current response and metrics do not
+distinguish the 128-waiter cap from the 50ms checkout deadline, nor establish why
+these requests reached Postgres; that is the next diagnostic checkpoint. The
+drain interval and protection settings were left unchanged.
+
+In both trials, sampled Deployment availability and ready endpoints stayed at
+least two, and there were no additional container restarts. In the follow-up,
+the controller completed the rollout in 8.15s. The old pods logged 1,325 successful
+redirect completions after endpoint withdrawal was observed and before
+`SIGTERM`, with no closing refusals. VM available memory stayed above 1.84 GiB,
+while the maximum sampled 30-second CPU non-idle average was 90.16% and CPU
+waiting pressure reached 82.32%. CPU scheduling contention is a lead, not a
+proven cause. Pool waiter gauges sampled zero; their scrape interval cannot
+rule out a short checkout delay or event-loop stall.
+
+Artifacts are in `.kind/rolling-restart/2026-11-12T11-51-37-405Z/` and
+`.kind/rolling-restart/2026-11-12T11-54-23-185Z/`. Each retains its k6 summary,
+shutdown timeline, drain evidence, resource history and dashboard window. The
+follow-up also has `application-evidence.json` with client failure bodies and
+per-pod Prometheus counters. Post-run logs from the replacement pods had already
+rotated past the failure interval, so their absence of matching log lines is not
+evidence of zero errors. `last-run.json` points to the failed follow-up.
 
 ## Run the services on the host for development
 
