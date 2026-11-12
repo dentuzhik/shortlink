@@ -86,6 +86,9 @@ spec:
               readOnly: true
             - name: data
               mountPath: /prometheus
+            - name: kubelet-ca
+              mountPath: /etc/kubelet-ca
+              readOnly: true
       volumes:
         - name: config
           configMap:
@@ -93,6 +96,9 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: prometheus-data
+        - name: kubelet-ca
+          configMap:
+            name: kubelet-metrics-ca
 ---
 apiVersion: v1
 kind: Service

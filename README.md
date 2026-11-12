@@ -432,6 +432,109 @@ the initial counter sample is already one. This is why the dashboard includes
 both cumulative totals and rates. A Grafana screenshot and query-check results
 are saved under `.kind/observability/`.
 
+## Monitor Colima and Kubernetes resources
+
+The separate **Shortlink resources** dashboard is provisioned from
+`deploy/monitoring/resources.json`. After resource-monitoring deployment, open:
+
+```text
+http://grafana.localhost:8080/d/shortlink-resources/shortlink-resources
+```
+
+The application dashboard remains focused on HTTP behavior and database pools.
+The resource dashboard covers VM CPU count, utilization and time modes; memory
+total and available; CPU, memory and I/O pressure stalls; Kubernetes allocatable
+resources; container requests and limits; per-pod CPU and memory usage, restarts,
+and readiness. **Namespaces (workloads)** filters only workload panels; the VM
+and cluster-allocation sections always show the complete local environment.
+
+The three metric sources have separate responsibilities:
+
+| Source                                               | What it measures                                                                       | Access                                                                             |
+| :--------------------------------------------------- | :------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------- |
+| Node Exporter v1.12.1 (`vm-metrics`)                 | Selected VM-wide CPU, memory, load and PSI counters                                    | No Kubernetes token or host mounts; ordinary pod reading selected `/proc` counters |
+| Existing kubelet `/metrics/resource`                 | Actual container CPU time and memory working sets                                      | Prometheus token, verified TLS with kind's public kubelet serving-CA bundle        |
+| kube-state-metrics v2.20.0 (`cluster-state-metrics`) | Node capacity/allocatable, container requests/limits, pod readiness and restart counts | Read-only watches of Node and Pod objects                                          |
+
+Kubernetes provides the usage endpoint, but it does not retain this history or
+provide these Grafana views by itself. `kubectl describe node` shows current
+capacity and declared allocations. `kubectl top` requires Metrics Server, which
+is not installed in this cluster. Metrics Server supplies the resource Metrics
+API used by tools and autoscaling; it is not required for Prometheus to scrape
+the existing kubelet endpoint. See the official
+[resource metrics pipeline](https://kubernetes.io/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/).
+
+This deployment is specific to our **single-node kind cluster inside Colima**.
+The node and VM share a Linux kernel. CPU count, `/proc/meminfo`, and memory PSI
+read inside an ordinary pod were compared with `colima ssh` and matched the VM
+counters. Node Exporter enables only CPU, meminfo, loadavg and pressure collectors;
+it does not claim to monitor host filesystems, interfaces, disks, or individual
+processes. Its pod is pinned to `shortlink-control-plane`. A multi-node or
+multi-VM deployment needs a different collector layout and host configuration.
+VM and node capacity are overlapping views, not additive resource pools. These
+metrics describe the Linux guest, not macOS host pressure or physical-core use.
+
+Provisioning with `pnpm monitoring:up` applies
+`deploy/k8s/resource-metrics.yaml`, copies only the public kubelet certificate
+chain to a ConfigMap, mounts it into Prometheus, and adds three scrape jobs.
+Kubelet scrapes verify the serving CA and the DNS identity
+`shortlink-control-plane` while discovery connects to the node IP. The existing
+internal-only Services expose the exporters inside the cluster; there are no
+new Gateway routes or host ports. The same setup runs through `pnpm k8s:up`.
+
+Review the access changes before applying them:
+
+- ServiceAccount `shortlink/cluster-state-metrics`: `get`, `list`, and `watch`
+  **Nodes and Pods across the cluster**. Pod reads include workload configuration;
+  they grant no Secret API access. Deployment objects are not needed or watched.
+- Existing ServiceAccount `shortlink/prometheus`: `get`, `list`, and `watch`
+  Nodes for discovery, plus `get` on `nodes/metrics` for
+  **`shortlink-control-plane` only**. It receives no `nodes/proxy` access.
+- Node Exporter has its Kubernetes token mount disabled. Neither collector uses
+  host namespaces, privileged mode, host mounts, or the Docker socket.
+
+The two collectors request **40 MiB RAM and 20m CPU combined**, with memory
+limits of 64 MiB and 96 MiB. These are configured requests/limits, not measured
+overhead. New time series also consume Prometheus memory and storage. The
+collectors appear in their own workload charts after deployment. On this small
+VM, check their actual costs before another load trial.
+
+Allocation queries sum **scheduled Pending/Running regular containers** and
+exclude completed Jobs. They omit init containers and Pod overhead, so they are
+not scheduler-exact effective Pod requests. An absent limit means unbounded,
+not a zero-resource ceiling. Configured limit totals may exceed VM capacity
+without reserving that amount. Working-set memory, process RSS, and VM total
+minus available are different measurements; use VM available memory and pressure
+alongside client behavior when sizing the backing VM.
+
+Active Pod state is matched by Pod UID and must come from the latest successful
+cluster-state scrape. This prevents an old Pod retained in Prometheus lookback
+after a collector restart from inflating current allocation, memory, and readiness
+counts. Kubelet memory gauges use the same active-Pod filter by namespace/name;
+the resource endpoint does not provide Pod UID labels.
+The setup script also avoids requesting a second replacement when applying a
+changed monitoring pod template has already started one.
+
+Pressure Stall Information measures time spent waiting for CPU, memory, or I/O,
+not utilization. `some` and `full` overlap and must not be summed. See the
+[Linux PSI definitions](https://docs.kernel.org/accounting/psi.html). Missing
+metrics stay missing instead of being rendered as healthy zeroes. Five-second
+scrapes and 30-second rates smooth short events. Collection starts only after
+installation and cannot reconstruct the earlier failed restart trial. All these
+collectors and Prometheus share the VM; a full VM outage also interrupts them.
+
+Verified locally on November 12, 2026 after resizing Colima to **2 CPUs / 4 GiB**:
+all three resource sources and both Fastify targets were healthy; the 39 panel
+queries and namespace selector executed; allocation totals matched the live Pod
+specifications; and ten calculation checks covered filtering, missing limits,
+CPU normalization, PSI, and retained deleted-Pod data. Guest `MemTotal` was about
+3.81 GiB and matched `colima ssh`; configured VM memory also includes reservations
+that are not reported as guest-usable RAM. About 2.2 GiB was available in the idle
+sample. The two collectors used about 19 MiB combined working-set memory, excluding
+additional Prometheus overhead. All 293 existing links and the original Postgres,
+Prometheus, and Grafana PVCs survived the VM restart. These checks do not establish
+the rolling-restart or throughput result at the larger allocation.
+
 ## Test a Fastify rolling restart
 
 With the Kubernetes stack running, apply the explicit rollout policy and run:

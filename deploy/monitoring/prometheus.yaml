@@ -20,3 +20,37 @@ scrape_configs:
         target_label: namespace
       - source_labels: [__meta_kubernetes_pod_name]
         target_label: pod
+  - job_name: colima-vm
+    static_configs:
+      - targets: ["vm-metrics:9100"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: node_cpu_seconds_total|node_memory_.*|node_pressure_.*|node_load[0-9]+|node_scrape_collector_success|node_exporter_build_info
+        action: keep
+  - job_name: cluster-state
+    static_configs:
+      - targets: ["cluster-state-metrics:8080"]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: kube_node_status_.*|kube_pod_.*
+        action: keep
+  - job_name: kubelet
+    scheme: https
+    metrics_path: /metrics/resource
+    authorization:
+      credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    tls_config:
+      ca_file: /etc/kubelet-ca/ca.crt
+      server_name: shortlink-control-plane
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: shortlink-control-plane
+        action: keep
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: container_cpu_usage_seconds_total|container_memory_working_set_bytes|resource_scrape_error
+        action: keep

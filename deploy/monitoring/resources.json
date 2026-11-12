@@ -1,0 +1,1538 @@
+{
+  "uid": "shortlink-resources",
+  "title": "Shortlink resources",
+  "description": "Colima VM CPU, memory and pressure; Kubernetes container usage, requests, limits, readiness and restarts.",
+  "tags": ["shortlink", "local", "resources"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "editable": false,
+  "links": [
+    {
+      "title": "Application dashboard",
+      "type": "link",
+      "url": "http://grafana.localhost:8080/d/shortlink-overview/shortlink-overview",
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespaces (workloads)",
+        "description": "Filters workload panels only. VM and allocation overviews always cover the whole local cluster.",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "shortlink-prometheus"
+        },
+        "query": {
+          "query": "query_result(count by (namespace) (count_over_time(kube_pod_status_phase{job=\"cluster-state\"}[${__range_s}s])))",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "definition": "query_result(count by (namespace) (count_over_time(kube_pod_status_phase{job=\"cluster-state\"}[${__range_s}s])))",
+        "regex": "/namespace=\"([^\"]+)\"/",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "shortlink",
+          "value": "shortlink"
+        },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Colima VM · one shared backing machine",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "description": "",
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "VM logical CPUs",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Logical CPU count visible to the Linux VM. This is not the physical Mac CPU count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(node_cpu_seconds_total{job=\"colima-vm\",mode=\"idle\"})",
+          "legendFormat": "VM logical CPUs",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "title": "VM total memory",
+      "type": "stat",
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Guest Linux MemTotal. It is slightly below the configured GiB because of kernel reservations.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemTotal_bytes{job=\"colima-vm\"}",
+          "legendFormat": "VM total memory",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "title": "VM available memory",
+      "type": "stat",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Linux MemAvailable estimates memory usable without swapping, including reclaimable cache. It is more useful than MemFree for sizing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemAvailable_bytes{job=\"colima-vm\"}",
+          "legendFormat": "VM available memory",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "title": "VM CPU · non-idle",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Thirty-second average of non-idle CPU time. Includes iowait; the mode chart separates execution from I/O waiting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(rate(node_cpu_seconds_total{job=\"colima-vm\",mode!=\"idle\"}[30s])) / count(node_cpu_seconds_total{job=\"colima-vm\",mode=\"idle\"})",
+          "legendFormat": "VM CPU · non-idle",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "title": "Memory stall · full",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Linux PSI full: fraction of time all non-idle tasks were simultaneously stalled on memory. A missing series is missing data, not zero.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(node_pressure_memory_stalled_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "Memory stall · full",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "title": "Sources up · expect 3",
+      "type": "stat",
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Expected here: one VM exporter, one kubelet, one cluster-state exporter. Scrape success does not prove application readiness.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(up{job=~\"colima-vm|cluster-state|kubelet\"}) or vector(0)",
+          "legendFormat": "Sources up · expect 3",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "title": "VM CPU time by mode",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "description": "CPU time fractions across VM logical CPUs. Idle and iowait are separate modes; guest modes are excluded to avoid double counting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (mode) (rate(node_cpu_seconds_total{job=\"colima-vm\",mode!~\"guest|guest_nice\"}[30s])) / scalar(count(node_cpu_seconds_total{job=\"colima-vm\",mode=\"idle\"}))",
+          "legendFormat": "{{mode}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "VM memory · total and available",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Total minus available is an estimate of memory not readily available, not summed process RSS. Cache and kernel memory are part of the VM budget.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemTotal_bytes{job=\"colima-vm\"}",
+          "legendFormat": "Total",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "node_memory_MemAvailable_bytes{job=\"colima-vm\"}",
+          "legendFormat": "Available",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "node_memory_MemTotal_bytes{job=\"colima-vm\"} - node_memory_MemAvailable_bytes{job=\"colima-vm\"}",
+          "legendFormat": "Total minus available",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "VM pressure stalls · 30s rates",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "description": "PSI measures stalled wall time, not CPU utilization. Some means at least one task stalled; full means all non-idle tasks stalled on that resource. Series overlap and must not be summed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * rate(node_pressure_cpu_waiting_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "CPU · some",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "100 * rate(node_pressure_memory_waiting_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "Memory · some",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "100 * rate(node_pressure_memory_stalled_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "Memory · full",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "expr": "100 * rate(node_pressure_io_waiting_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "I/O · some",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "E",
+          "expr": "100 * rate(node_pressure_io_stalled_seconds_total{job=\"colima-vm\"}[30s])",
+          "legendFormat": "I/O · full",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "VM non-idle CPU and pod execution",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "description": "These are overlapping views, not additive pools. VM time includes runtime/OS activity, other Docker workloads, and iowait; pod counters measure container CPU execution. One core means one CPU-second per second.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(node_cpu_seconds_total{job=\"colima-vm\",mode!=\"idle\"}[30s]))",
+          "legendFormat": "VM non-idle (includes iowait)",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"kubelet\"}[30s]))",
+          "legendFormat": "Pod CPU execution · all namespaces",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Kubernetes allocation · all namespaces",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "description": "",
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "title": "CPU allocatable",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Kubernetes node allocatable CPU. Our single kind node shares Colima capacity; do not add this to VM CPUs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_node_status_allocatable{job=\"cluster-state\",resource=\"cpu\",unit=\"core\"})",
+          "legendFormat": "CPU allocatable",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Container CPU requests",
+      "type": "stat",
+      "gridPos": {
+        "x": 4,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Sum of regular-container requests for scheduled Pending/Running pods. Requests inform scheduling and CPU shares; they are not CPU usage or a cap. Init containers and Pod overhead are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"cpu\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Container CPU requests",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "title": "Memory allocatable",
+      "type": "stat",
+      "gridPos": {
+        "x": 8,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Kubernetes allocatable memory. In kind, system reservations may be small; OS/runtime demand still exists outside the summed pod working sets.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(kube_node_status_allocatable{job=\"cluster-state\",resource=\"memory\",unit=\"byte\"})",
+          "legendFormat": "Memory allocatable",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 16,
+      "title": "Container memory requests",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Regular-container memory requests for scheduled active pods. Requests are not measured consumption; terminal Job pods are excluded. Init containers and Pod overhead are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"memory\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Container memory requests",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 17,
+      "title": "Configured memory limits",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Sum of configured regular-container memory limits. This can exceed VM RAM and does not reserve that amount. Containers with no limit add no value to this sum.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum((kube_pod_container_resource_limits{job=\"cluster-state\",resource=\"memory\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Configured memory limits",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 18,
+      "title": "Containers · no CPU limit",
+      "type": "stat",
+      "gridPos": {
+        "x": 20,
+        "y": 22,
+        "w": 4,
+        "h": 4
+      },
+      "description": "Active regular containers with no positive configured CPU limit. A CPU request alone does not impose a ceiling.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count((kube_pod_container_info{job=\"cluster-state\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))) unless on (namespace,pod,uid,container) (kube_pod_container_resource_limits{job=\"cluster-state\",resource=\"cpu\"} > 0)) or (0 * max(up{job=\"cluster-state\"} == 1))",
+          "legendFormat": "Containers · no CPU limit",
+          "editorMode": "code",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["last"],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 19,
+      "title": "CPU · usage, requests, allocatable",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "description": "All namespaces. Requests cover scheduled active regular containers. Pod usage omits non-containerized VM services; requests omit init containers and Pod overhead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{job=\"kubelet\"}[30s]))",
+          "legendFormat": "Pod usage · cores",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"cpu\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Container requests",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "sum(kube_node_status_allocatable{job=\"cluster-state\",resource=\"cpu\",unit=\"core\"})",
+          "legendFormat": "Node allocatable",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "Memory · working sets and allocation",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Working set is a usage estimate, not identical to RSS or VM total minus available. Limits are per-container ceilings, not reservations; missing limits are unbounded and excluded from the limit sum. Inspect VM available memory for the complete backing-machine picture. Live memory gauges are filtered to freshly observed active Pods so deleted-pod samples retained after a Prometheus restart are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum((container_memory_working_set_bytes{job=\"kubelet\"} and on (namespace,pod) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Pod working sets",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"memory\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Container requests",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "sum((kube_pod_container_resource_limits{job=\"cluster-state\",resource=\"memory\",node!=\"\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "Configured limits",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "expr": "sum(kube_node_status_allocatable{job=\"cluster-state\",resource=\"memory\",unit=\"byte\"})",
+          "legendFormat": "Node allocatable",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "title": "Workloads · filtered by Namespaces (workloads)",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 24,
+        "h": 1
+      },
+      "description": "",
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 22,
+      "title": "Pod CPU usage",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "description": "CPU execution per pod. One full core is one CPU-second per second. Thirty-second windows smooth and lag short bursts; new counters need baseline samples.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace,pod) (rate(container_cpu_usage_seconds_total{job=\"kubelet\",namespace=~\"$namespace\"}[30s]))",
+          "legendFormat": "{{namespace}}/{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "title": "Pod memory working set",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Container working sets summed by pod. This includes both collectors and the existing monitoring services, so their overhead is visible. It is not a precise process RSS total. Live memory gauges are filtered to freshly observed active Pods so deleted-pod samples retained after a Prometheus restart are excluded.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace,pod) ((container_memory_working_set_bytes{job=\"kubelet\",namespace=~\"$namespace\"} and on (namespace,pod) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "{{namespace}}/{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "title": "Pod CPU requests and configured limits",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Only configured limits produce limit series. A missing limit is not a zero-CPU cap. Allocations sum regular containers and exclude init containers and Pod overhead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace,pod) ((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"cpu\",node!=\"\",namespace=~\"$namespace\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "{{namespace}}/{{pod}} · request",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (namespace,pod) ((kube_pod_container_resource_limits{job=\"cluster-state\",resource=\"cpu\",node!=\"\",namespace=~\"$namespace\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "{{namespace}}/{{pod}} · limit",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "title": "Pod memory requests and configured limits",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 43,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Compare with the working-set chart above. A request is a scheduling input, a limit is a container ceiling. Unset limits do not produce a line; allocations exclude init containers and Pod overhead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace,pod) ((kube_pod_container_resource_requests{job=\"cluster-state\",resource=\"memory\",node!=\"\",namespace=~\"$namespace\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "{{namespace}}/{{pod}} · request",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (namespace,pod) ((kube_pod_container_resource_limits{job=\"cluster-state\",resource=\"memory\",node!=\"\",namespace=~\"$namespace\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1))))",
+          "legendFormat": "{{namespace}}/{{pod}} · limit",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 2,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "title": "Container restarts · pod lifetime",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Cumulative restart counts in each pod lifetime. New pod names start new series. These counts do not identify the reason: inspect termination state/events to distinguish OOM kills, liveness failures, and application exits.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace,pod) (kube_pod_container_status_restarts_total{job=\"cluster-state\",namespace=~\"$namespace\"})",
+          "legendFormat": "{{namespace}}/{{pod}}",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "title": "Pods ready and active",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 51,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Ready comes from Kubernetes Pod conditions; active means Pending or Running. This complements scrape health but is not an end-to-end availability check. Conditions and counts are sampled and can lag.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "shortlink-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (namespace) (kube_pod_status_ready{job=\"cluster-state\",condition=\"true\",namespace=~\"$namespace\"} and on (namespace,pod,uid) ((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\",namespace=~\"$namespace\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\",namespace=~\"$namespace\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1)))",
+          "legendFormat": "{{namespace}} · ready",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "count by (namespace) (((kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\",namespace=~\"$namespace\"} == 1) and on (namespace,pod,uid,phase) (timestamp(kube_pod_status_phase{job=\"cluster-state\",phase=~\"Pending|Running\",namespace=~\"$namespace\"}) == on (job,instance) group_left timestamp(up{job=\"cluster-state\"})) and on (job,instance) (up{job=\"cluster-state\"} == 1)))",
+          "legendFormat": "{{namespace}} · active",
+          "editorMode": "code",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "—",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull", "max"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 28,
+      "title": "Reading the resource dashboard",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 24,
+        "h": 9
+      },
+      "description": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**One backing machine:** Colima is a Linux VM; the kind node is a container inside it. VM and Kubernetes capacities describe overlapping resources, so do not add them. This limited Node Exporter reads CPU, memory, load and PSI counters from `/proc`; those counters were checked against `colima ssh`. Filesystem, network, disk-device and process collectors are disabled. This local setup is not a general multi-node deployment.\n\n**Three sources:** Node Exporter provides VM counters. The kubelet `/metrics/resource` endpoint provides container usage. kube-state-metrics reads Node and Pod objects to provide configured allocations, readiness and restart counts. No Metrics Server is required for this dashboard. All endpoints are internal. Kubelet scrapes use a service-account token and the kind kubelet's serving CA with TLS verification.\n\n**Usage differs from allocation:** CPU requests guide scheduling/shares and are not caps. Memory requests are scheduling inputs; limits are container ceilings. An absent limit is unbounded, not zero. Allocation sums here include scheduled active regular containers; init containers and Pod overhead are excluded. For scheduler-exact Pod accounting, use the scheduler's effective Pod resource metrics. Pod working sets are not identical to RSS or guest-wide memory usage; the VM also hosts OS/runtime processes and other Docker containers.\n\n**Sizing experiments:** compare VM available memory and PSI stalls with client latency, pod usage and restarts over the same time range. `some` and `full` PSI series overlap; do not sum them. Samples arrive every 5s and rates use 30s windows. Missing data stays missing. The collectors consume resources too and appear in the workload charts. Namespace selection affects only the workload section; VM and allocation overviews remain global.\n\n**Collection boundary:** these metrics describe Colima's Linux guest, not macOS host memory pressure or physical CPU availability. The collectors and Prometheus share that VM; a VM outage creates a monitoring gap, and measurements start only after these collectors are installed. They cannot reconstruct the earlier restart trial.\n\n**Fresh allocations and memory gauges:** active Pod state must come from the latest successful cluster-state scrape, matched by sample timestamp. This prevents a deleted Pod retained in Prometheus lookback after a collector restart from contributing to current allocations, memory totals and readiness counts. Pod identities include UID in allocation joins."
+      }
+    }
+  ]
+}
