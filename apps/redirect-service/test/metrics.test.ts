@@ -8,7 +8,8 @@ import { RedirectPoolBusyError } from "../src/redirect-admission.js";
 function setup() {
   const app = Fastify();
   const pool = { totalCount: 3, idleCount: 1, waitingCount: 4 };
-  const metrics = registerMetrics(app, pool);
+  const diagnostics = registerMetrics(app, pool);
+  const metrics = diagnostics.server;
   onTestFinished(async () => {
     await app.close();
     await metrics.close();
@@ -35,7 +36,7 @@ function setup() {
     expect(response.headers["cache-control"]).toBe("no-store");
     return response.body;
   };
-  return { app, pool, scrape };
+  return { app, pool, scrape, diagnostics };
 }
 
 function sample(
@@ -60,6 +61,53 @@ function sample(
 }
 
 describe("application metrics", () => {
+  test("counts checkout rejections once per lookup and separates Redis read outcomes", async () => {
+    const { diagnostics, scrape } = setup();
+    for (const outcome of [
+      "acquired",
+      "queue_full",
+      "timeout",
+      "error",
+    ] as const) {
+      diagnostics.observeRedirectCheckout({
+        outcome,
+        elapsedMs: outcome === "timeout" ? 75 : 10,
+        totalCount: 5,
+        idleCount: 0,
+        waitingCount: 2,
+      });
+    }
+    for (const outcome of ["hit", "miss", "unavailable"] as const) {
+      diagnostics.observeRedisRead(outcome);
+    }
+    const body = await scrape();
+    for (const reason of ["queue_full", "timeout"]) {
+      expect(
+        sample(body, "shortlink_redirect_db_checkout_rejections_total", {
+          reason,
+        }),
+      ).toBe(1);
+    }
+    expect(
+      sample(body, "shortlink_redirect_db_checkout_duration_seconds_sum", {
+        outcome: "timeout",
+      }),
+    ).toBeCloseTo(0.075);
+    expect(
+      sample(body, "shortlink_redirect_db_checkout_duration_seconds_count", {
+        outcome: "acquired",
+      }),
+    ).toBe(1);
+    for (const outcome of ["hit", "miss", "unavailable"]) {
+      expect(
+        sample(body, "shortlink_redirect_redis_reads_total", { outcome }),
+      ).toBe(1);
+    }
+    expect(
+      sample(body, "shortlink_event_loop_delay_max_seconds"),
+    ).toBeGreaterThanOrEqual(0);
+  });
+
   test("aggregates codes into one route and counts actual HTTP response statuses", async () => {
     const { app, scrape } = setup();
     for (const url of [

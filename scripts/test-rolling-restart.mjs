@@ -61,6 +61,25 @@ const report = {
 };
 const timeline = createWriteStream(`${runDir}/timeline.ndjson`);
 const samples = [];
+const followers = [];
+const followedPods = new Set();
+function followPod(pod) {
+  if (followedPods.has(pod)) return;
+  followedPods.add(pod);
+  const output = createWriteStream(`${runDir}/${pod}.log`);
+  const child = spawn("kubectl", [
+    ...kubeArgs,
+    "logs",
+    "--follow",
+    "--timestamps",
+    `--since-time=${new Date(report.createdAt - 5000).toISOString()}`,
+    pod,
+  ]);
+  child.stdout.pipe(output, { end: false });
+  child.stderr.pipe(output, { end: false });
+  child.once("close", () => output.end());
+  followers.push(child);
+}
 async function snapshot() {
   const resources = JSON.parse(
     await kube("get", "pods,deployments,endpointslices", "-o", "json"),
@@ -81,6 +100,7 @@ async function snapshot() {
       deletionTimestamp: pod.metadata.deletionTimestamp,
       deletionGracePeriodSeconds: pod.metadata.deletionGracePeriodSeconds,
       phase: pod.status.phase,
+      imageID: pod.status.containerStatuses?.[0]?.imageID,
     }));
   const current = resources.find(
     (item) =>
@@ -107,6 +127,13 @@ async function snapshot() {
   };
   samples.push(sample);
   timeline.write(`${JSON.stringify(sample)}\n`);
+  // Follow replacement pods too: their request logs can rotate before the
+  // trial ends, losing short post-restart rejection bursts on a later fetch.
+  if (report.originalPods) {
+    for (const pod of pods) {
+      if (pod.phase === "Running") followPod(pod.name);
+    }
+  }
   return sample;
 }
 const before = await snapshot();
@@ -117,21 +144,8 @@ if (before.pods.length !== 2 || before.pods.some((pod) => !pod.ready)) {
   );
 }
 report.originalPods = before.pods.map((pod) => pod.name);
-const followers = report.originalPods.map((pod) => {
-  const output = createWriteStream(`${runDir}/${pod}.log`);
-  const child = spawn("kubectl", [
-    ...kubeArgs,
-    "logs",
-    "--follow",
-    "--timestamps",
-    "--since=5s",
-    pod,
-  ]);
-  child.stdout.pipe(output, { end: false });
-  child.stderr.pipe(output, { end: false });
-  child.once("close", () => output.end());
-  return child;
-});
+report.containerImageIDs = [...new Set(before.pods.map((pod) => pod.imageID))];
+for (const pod of report.originalPods) followPod(pod);
 
 let monitoring = true;
 const monitor = (async () => {

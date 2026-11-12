@@ -25,16 +25,39 @@ export function buildApp(
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   const pool = createDatabasePool(databaseUrl, poolMax);
-  const metricsServer = registerMetrics(app, pool);
+  const metrics = registerMetrics(app, pool);
+  const metricsServer = metrics.server;
   app.decorate("metricsServer", metricsServer);
   const checkoutRedirect = createRedirectCheckout(
     pool,
     redirectMaxWaiters,
     redirectCheckoutTimeoutMs,
+    (observation) => {
+      metrics.observeRedirectCheckout(observation);
+      if (
+        observation.outcome === "queue_full" ||
+        observation.outcome === "timeout"
+      ) {
+        app.log.warn(
+          {
+            ...observation,
+            checkoutTimeoutMs: redirectCheckoutTimeoutMs,
+            maxWaiters: redirectMaxWaiters,
+            eventLoopDelayMaxMsSinceScrape: metrics.eventLoopDelayMaxMs(),
+          },
+          "Redirect database checkout rejected",
+        );
+      }
+    },
   );
   const linkStore = createLinkStore(pool, checkoutRedirect);
   const cache = redisUrl
-    ? createRedirectCache(redisUrl, linkStore.findTargetUrl, app.log)
+    ? createRedirectCache(
+        redisUrl,
+        linkStore.findTargetUrl,
+        app.log,
+        metrics.observeRedisRead,
+      )
     : undefined;
 
   pool.on("error", (error) => {

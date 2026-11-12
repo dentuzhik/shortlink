@@ -9,6 +9,7 @@ export function createRedirectCache(
   redisUrl: string,
   findInPostgres: RedirectLookup,
   log: FastifyBaseLogger,
+  observeRead?: (outcome: "hit" | "miss" | "unavailable") => void,
 ) {
   const redis = new Redis(redisUrl, {
     commandTimeout: 25,
@@ -30,6 +31,13 @@ export function createRedirectCache(
   ) => {
     const key = `shortlink:redirect:${code}`;
     const cachedUrl = await readRedis(key);
+    observeRead?.(
+      typeof cachedUrl === "string"
+        ? "hit"
+        : cachedUrl === null
+          ? "miss"
+          : "unavailable",
+    );
 
     if (typeof cachedUrl === "string") {
       onCacheSource?.("HIT");

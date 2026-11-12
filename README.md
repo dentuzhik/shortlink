@@ -232,12 +232,16 @@ The `onResponse` hook counts completed responses and observes their Fastify
 duration. A second Fastify listener serves the registry at `/metrics` on port
 9090. Closing the application also closes that listener before ending the pool.
 
-| Metric                                    | Type      | Meaning                                                              |
-| :---------------------------------------- | :-------- | :------------------------------------------------------------------- |
-| `shortlink_http_requests_total`           | Counter   | Completed responses by HTTP method, route template, and status code. |
-| `shortlink_http_request_duration_seconds` | Histogram | Response durations in seconds, using the same labels.                |
-| `shortlink_db_pool_connections`           | Gauge     | Existing pool clients with `state="idle"` or `state="in_use"`.       |
-| `shortlink_db_pool_waiting_requests`      | Gauge     | Checkouts currently waiting in the pg pool queue.                    |
+| Metric                                            | Type      | Meaning                                                                                        |
+| :------------------------------------------------ | :-------- | :--------------------------------------------------------------------------------------------- |
+| `shortlink_http_requests_total`                   | Counter   | Completed responses by HTTP method, route template, and status code.                           |
+| `shortlink_http_request_duration_seconds`         | Histogram | Response durations in seconds, using the same labels.                                          |
+| `shortlink_db_pool_connections`                   | Gauge     | Existing pool clients with `state="idle"` or `state="in_use"`.                                 |
+| `shortlink_db_pool_waiting_requests`              | Gauge     | Checkouts currently waiting in the pg pool queue.                                              |
+| `shortlink_redirect_db_checkout_rejections_total` | Counter   | Rejected checkout attempts by `reason="queue_full"` or `"timeout"`.                            |
+| `shortlink_redirect_db_checkout_duration_seconds` | Histogram | Checkout elapsed time by `outcome="acquired"`, `"queue_full"`, `"timeout"`, or `"error"`.      |
+| `shortlink_redirect_redis_reads_total`            | Counter   | Cache read outcomes: `hit`, `miss`, or `unavailable` (failed reads and circuit bypasses).      |
+| `shortlink_event_loop_delay_max_seconds`          | Gauge     | Maximum Node event-loop sampling delay since the preceding metrics scrape, at 10ms resolution. |
 
 Counters and histograms accumulate until the process restarts. Pool gauges read
 `totalCount`, `idleCount`, and `waitingCount` when scraped; collecting them opens
@@ -245,12 +249,47 @@ no connections and runs no SQL. `in_use` is `totalCount - idleCount`, which incl
 clients still connecting and is not a count of active SQL queries. These are
 snapshots, so a periodic scrape can miss a short queue spike.
 
+Checkout rejection counters record events when they happen, so a scrape can
+observe the accumulated count even after a short queue or delay has disappeared.
+They count underlying database lookup attempts, not HTTP followers sharing a
+lookup through coalescing. One rejected checkout can therefore produce several
+`503` responses. The structured `Redirect database checkout rejected` log records
+the reason, elapsed time, current pool counts, configured limits and the maximum
+event-loop delay observed since the preceding scrape. No URL or short code is
+included in this diagnostic event.
+
+The event-loop monitor uses Node's built-in `monitorEventLoopDelay`; its samples
+include the normal 10ms sampling interval and scheduling delays. A high value
+shows that Node was delayed, but does not identify whether CPU scheduling, GC or
+synchronous application work caused that delay. Scraping resets its maximum;
+closing the metrics listener disables the monitor. `registerMetrics` returns the
+listener and observer callbacks, which `buildApp` passes into checkout and cache
+handling without adding a Prometheus dependency to those helpers.
+
+In Grafana Explore, select **Shortlink Prometheus** and inspect these queries:
+
+```promql
+sum by (pod, reason) (increase(shortlink_redirect_db_checkout_rejections_total[1m]))
+```
+
+```promql
+shortlink_event_loop_delay_max_seconds
+```
+
+```promql
+sum by (pod, outcome) (rate(shortlink_redirect_redis_reads_total[30s]))
+```
+
+The existing dashboard panels remain unchanged. A minute-long `increase` is an
+extrapolated estimate; use counter values and the retained rejection logs for
+exact incident counts.
+
 Route labels use `/:code`, `/links`, `/graphql`, or `unmatched`; they contain no
 short codes, destinations, request bodies, or query strings. Uncommon HTTP
 methods are grouped as `OTHER`. Health/readiness probes and requests to the
 separate metrics listener are excluded from application HTTP metrics.
 
-The histogram has a bucket at `0.1` seconds. Its count gives the exact number of
+The HTTP duration histogram has a bucket at `0.1` seconds. Its count gives the exact number of
 observed server responses at or below 100 ms; later, Prometheus can estimate
 percentiles from all the buckets. This measures Fastify time, while our performance
 target measures client time and correct redirects. HTTP status is also separate
@@ -779,9 +818,9 @@ or `SIGTERM`. In the follow-up, all 19 failures started in a burst approximately
 29.2s and 33.2s. Every captured body was
 `{"error":"Redirect temporarily unavailable"}`, identifying the application's
 Postgres checkout protection. Prometheus attributed all 19 to replacement pod
-`redirect-service-7b67bbfd45-xkrbr`. The current response and metrics do not
+`redirect-service-7b67bbfd45-xkrbr`. At that point, the response and metrics did not
 distinguish the 128-waiter cap from the 50ms checkout deadline, nor establish why
-these requests reached Postgres; that is the next diagnostic checkpoint. The
+these requests reached Postgres. The diagnostic trials below investigate this. The
 drain interval and protection settings were left unchanged.
 
 In both trials, sampled Deployment availability and ready endpoints stayed at
@@ -800,7 +839,81 @@ shutdown timeline, drain evidence, resource history and dashboard window. The
 follow-up also has `application-evidence.json` with client failure bodies and
 per-pod Prometheus counters. Post-run logs from the replacement pods had already
 rotated past the failure interval, so their absence of matching log lines is not
-evidence of zero errors. `last-run.json` points to the failed follow-up.
+evidence of zero errors.
+
+### Checkout rejection diagnosis
+
+The debugging increment added the checkout outcome/reason, Redis read outcome
+and event-loop metrics described above, plus structured rejection logs. It
+preserves all protection settings: five connections per pool, a 128-waiter
+admission threshold, a 50ms checkout deadline, and the five-second drain. The
+runner now follows replacement-pod logs as well as old-pod logs, and records
+container image IDs, so rotation cannot erase the observed post-rollout burst
+from a later log fetch.
+
+The debug image passed 28 unit tests and all 14 integration tests. The new unit
+tests cover queue rejection, successful checkout, deadline expiry, release of a
+late connection, a late pg failure, an overdue completion before timers run and
+an early pg error. The real Postgres/Redis integration test verifies one metric
+event for each controlled queue-full and checkout-timeout rejection. The timeout
+reporting path is idempotent: a later pg settlement does not count it again.
+
+Two more unchanged 90-second trials ran at 1,000 redirects/s plus 10 creations/s:
+
+| Measurement                      | First diagnostic trial | Reproduction |
+| :------------------------------- | ---------------------: | -----------: |
+| Redirect visits                  |                 90,001 |       90,001 |
+| Correct redirects                |                 90,001 |       89,875 |
+| HTTP `503` responses             |                      0 |          126 |
+| Successful creations             |              900 / 900 |    900 / 900 |
+| Dropped starts                   |                      0 |            0 |
+| Checkout timeout events          |                      0 |           37 |
+| Queue-full rejection events      |                      0 |            0 |
+| Restart-window client p99        |                  25 ms |        96 ms |
+| Maximum redirect client duration |                  75 ms |       361 ms |
+
+The first run passed every threshold; the repeat reproduced the failure. Its
+37 rejected checkout attempts took **50.03–96.48ms**, crossing the 50ms deadline.
+The pool had **0–8 waiters** when those rejections were recorded, and the exact
+queue-full counters remained zero. Coalesced followers propagated those 37
+lookup failures into 126 failed HTTP redirects. Per-pod counters and retained
+logs agree: 2 / 16 / 19 timeout events produced 2 / 67 / 57 HTTP `503`s across
+the three affected processes. This identifies the rejection path in this
+reproduction; it does not retroactively prove the cause of the previous
+uninstrumented runs.
+
+Rejections occurred 20.75–31.45s into the repeat. Redis command timeouts opened
+the existing read breaker three times across two pods, each recovering after
+approximately a second. Failed reads and open-circuit bypasses fall back to
+Postgres, so these events explain additional database lookup attempts despite
+Redis remaining deployed. The breaker was observed without changing its behavior
+or thresholds. Recent event-loop delay maxima recorded with rejected checkouts
+reached 88.08ms; sampled per-pod peaks reached 111.35ms. These delays are comparable
+to or larger than the 50ms checkout allowance.
+
+The 2-CPU VM reached a sampled 30-second CPU non-idle average of 89.32% and CPU
+waiting pressure of 84.93%, while available memory stayed above 1.74 GiB with no
+additional container restarts. This supports investigating shared CPU scheduling
+and event-loop delays as contributors, but does not establish a single root cause
+or prove that Postgres queries were slow. Some rejection snapshots showed idle
+connections; those are snapshots after a late connection may have been released,
+not proof that it was usable throughout the checkout wait. A controlled CPU
+allocation comparison is a subsequent experiment, keeping deadlines fixed.
+
+The reproduction also failed the per-phase correct-within-100ms target:
+**98.73% baseline**, **98.94% restart window**, and **100% after**. Its overall
+99.24% fraction and 96ms restart-window p99 do not override those failures:
+correctness and latency must be assessed together, with the failures in the
+denominator. Sampled availability and ready endpoints stayed at least two, and
+old pods logged no closing refusals. Both replacement pods were healthy with
+zero container restarts after the run. No tuning or remedial fix was applied.
+
+Artifacts are in `.kind/rolling-restart/2026-11-12T12-36-45-485Z/` and
+`.kind/rolling-restart/2026-11-12T12-39-22-155Z/`. In addition to the k6 summaries,
+all-pod logs, timeline and resource reports, they contain
+`checkout-diagnostics.json` and `checkout-metric-series.json` with rejection,
+cache and event-loop evidence. `last-run.json` now points to the failed
+reproduction. These measurements apply to the local VM and this traffic pattern.
 
 ## Run the services on the host for development
 

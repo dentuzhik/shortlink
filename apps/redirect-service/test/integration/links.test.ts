@@ -620,6 +620,19 @@ describe("links with Postgres", () => {
         expect(expired.statusCode).toBe(503);
         expect(expired.headers["cache-control"]).toBe("no-store");
 
+        const guardMetrics =
+          guardedApp.getDecorator<FastifyInstance>("metricsServer");
+        const diagnosticBody = (await guardMetrics.inject("/metrics")).body;
+        expect(diagnosticBody).toContain(
+          'shortlink_redirect_db_checkout_rejections_total{reason="queue_full"} 1',
+        );
+        expect(diagnosticBody).toContain(
+          'shortlink_redirect_db_checkout_rejections_total{reason="timeout"} 1',
+        );
+        expect(diagnosticBody).toContain(
+          'shortlink_redirect_redis_reads_total{outcome="hit"}',
+        );
+
         // A follower can still join the active lookup. A write can use the
         // connection once the expired checkout releases it.
         const shared = guardedApp
