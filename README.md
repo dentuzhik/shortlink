@@ -97,6 +97,29 @@ flowchart LR
 The Service boxes show routing references. Traefik discovers their pod endpoints
 and forwards requests to those pods; Next.js uses the internal API Service address.
 
+Fastify runs with two replicas, declared in `deploy/k8s/apps.yaml`. Each pod runs
+its own Node.js process, Postgres pool (maximum five connections), request
+coalescing map, Redis read circuit breaker, and metrics registry. Both use the
+same Postgres and Redis Services. Two steady-state replicas can therefore open
+up to ten pool connections; a rolling update can temporarily add more pods and
+connections. Coalescing remains local to each process, so both pods may query
+Postgres for the same uncached code.
+
+The existing application Service and Gateway discover both ready pods without
+new public addresses. Prometheus discovers both metrics endpoints independently.
+This is horizontal application scaling within the same kind node and Colima VM;
+it adds no machine capacity and does not protect against a VM restart. Existing
+benchmark results do not establish the throughput of this two-replica setup.
+
+Inspect replicas and ready application endpoints with:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get deployment redirect-service
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get pods -l app=redirect-service -o wide
+kubectl --kubeconfig .kind/kubeconfig -n shortlink get endpointslices \
+  -l kubernetes.io/service-name=redirect-service
+```
+
 Fastify connects to `redis://redis:6379` through the internal Redis Service. Redis
 has no Gateway route or host port. It uses the same image and cache implementation
 as Compose: a successful lookup fills the cache for 60 seconds, and an unavailable
