@@ -432,6 +432,90 @@ the initial counter sample is already one. This is why the dashboard includes
 both cumulative totals and rates. A Grafana screenshot and query-check results
 are saved under `.kind/observability/`.
 
+## Test a Fastify rolling restart
+
+With the Kubernetes stack running, apply the explicit rollout policy and run:
+
+```sh
+kubectl --kubeconfig .kind/kubeconfig --context kind-shortlink -n shortlink \
+  apply -f deploy/k8s/apps.yaml
+pnpm test:rolling-restart
+```
+
+This deliberately replaces **both Fastify pods** while k6 sends **100 redirects/s
+for 90 seconds through the Gateway**. It creates ten fixture links, warms them,
+collects a 20-second baseline, requests a rolling restart, and continues traffic.
+The fixed reporting windows are baseline (0–20s), restart window (20–60s), and
+after (60–90s); actual restart and rollout completion timestamps are recorded
+separately. A rollout taking more than the 40-second restart window fails the
+test. Redis and Postgres keep running; Redis's normal 60-second TTL still applies.
+The fixture rows remain in the local database.
+
+The Deployment declares `maxUnavailable: 0` and `maxSurge: 1`. Kubernetes can
+start one extra non-terminating pod while preserving two available replicas.
+Terminating pods can briefly add to the physical count. Fastify's existing
+`SIGTERM` handler calls `app.close()`; the container entrypoint uses `exec`, so
+Node receives that signal. This test initially adds no shutdown delay or retry
+middleware: it measures the existing handoff behavior.
+
+The strict correctness goal is zero wrong destinations, connection errors, or
+unexpected statuses, plus `Cache-Control: no-store` on every redirect. k6 must
+drop no scheduled iterations, execute at least 8,999 visits, and complete at least
+99% correctly within 100ms both overall and in each reporting window. The runner
+also checks that both old pods were replaced, the rollout completed, and sampled
+Deployment availability stayed at two. This is a restart check at moderate load,
+not qualification of the separate 1,000 redirects/s + 10 creations/s target.
+
+The runner uses native `k6` from `PATH`, or the executable specified by `K6_BIN`.
+Otherwise it uses the pinned Docker k6 image, sharing Colima's resources. It saves
+the k6 summary and log, one-second pod/endpoint/availability snapshots, old-pod
+shutdown logs, Kubernetes events, and run metadata beneath
+`.kind/rolling-restart/<timestamp>/`. `last-run.json` points to the latest report
+and its fixed dashboard time window. A failed threshold exits nonzero while
+preserving the diagnostics; the runner does not roll back or alter the shutdown
+implementation automatically.
+
+In Grafana, old pod series end and two replacement names appear. Their counters
+and pools start fresh, while Redis remains shared. Three serving pods may briefly
+share traffic. Successful scrape counts may fluctuate and failed scrapes may
+appear during startup/termination because the metrics Service includes unready
+pods. Scrape failures are separate from user-visible failures; k6 also detects
+Gateway/network failures that never reach Fastify's HTTP counters. Five-second
+scrapes and one-second control-plane snapshots can miss short transitions, so
+the client measurements are the primary continuity evidence.
+
+The first trial on November 12, 2026 **failed** on the unchanged 2-CPU / 2-GiB
+Colima VM, with native k6 on the Mac:
+
+| Measurement                                 |        Result |
+| :------------------------------------------ | ------------: |
+| Baseline correct redirects                  | 2,000 / 2,000 |
+| Baseline client p99                         |         13 ms |
+| Completed visits across the trial           |         8,750 |
+| Correct redirects across the trial          |         3,012 |
+| Failed or incorrect redirects               |         5,738 |
+| Dropped starts                              |           251 |
+| Overall client p99                          |      3,001 ms |
+| Restart request to rollout completion       |        73.0 s |
+| Minimum sampled Deployment availability     |             2 |
+| Minimum sampled ready application endpoints |             1 |
+
+The rollout finished after the scheduled traffic had ended. The phase named
+`after` in this failed run is the fixed 60–90s window, not a successful period
+after rollout completion.
+
+The availability field alone hid the practical degradation: Fastify returned
+`503`s before its shutdown signal, clients timed out, and probes failed across
+Postgres, Traefik, Grafana, and the application. VM diagnostics after the trial
+showed only about 123–136 MiB available memory, no swap, and substantial memory
+and CPU pressure. This is strong evidence of shared VM resource contention;
+it does not isolate shutdown behavior or prove a single root cause. Both
+replacement Fastify pods, the Gateway, and Grafana experienced container restarts.
+The stack recovered to two ready Fastify replicas after the trial. No shutdown
+delay, breaker tuning, VM resize, or weakened thresholds were applied to make
+this run pass. Preserve this result when comparing a later trial with more VM
+capacity; zero-downtime restart behavior remains unproven.
+
 ## Run the services on the host for development
 
 Prerequisites: Node.js 26.13.0, pnpm 12.18.0, Colima, Docker CLI, and Docker Compose.
