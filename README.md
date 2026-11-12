@@ -619,6 +619,47 @@ delay, breaker tuning, VM resize, or weakened thresholds were applied to make
 this run pass. Preserve this result when comparing a later trial with more VM
 capacity; zero-downtime restart behavior remains unproven.
 
+A repeat later on November 12 used **2 CPUs / 4 GiB**, with the new resource
+collectors enabled. The application image, shutdown behavior, rollout policy,
+native k6 scenario, and thresholds were unchanged. The strict test still
+**failed**, with a much smaller interruption:
+
+| Measurement        | 2 GiB trial | 4 GiB repeat |
+| :----------------- | ----------: | -----------: |
+| Completed visits   |       8,750 |        8,973 |
+| Correct redirects  |       3,012 |        8,890 |
+| Failed visits      |       5,738 |           83 |
+| Dropped starts     |         251 |           27 |
+| Overall client p99 |    3,001 ms |      9.27 ms |
+| Rollout duration   |      73.0 s |        4.6 s |
+
+The repeat's 2,000 baseline and 3,000 post-rollout visits were all correct and
+within 100ms. During the fixed restart window, 3,890 of 3,973 visits were correct
+within 100ms (97.91%); that window's client p99 was 3,001ms. The failures comprise
+75 timeout warnings, seven sampled `502`s, and one sampled `503`, accounting for
+all 83 failed visits. The Fastify log explicitly recorded a request refused
+because the server was closing, 19ms after its `SIGTERM` log. The evidence points
+to a shutdown/routing handoff problem; the test did not change that behavior.
+An aggregate p99 below 100ms did not capture this concentrated failure window.
+
+Recorded VM available memory stayed above **2.04 GiB**. Memory PSI full stalls
+peaked below **0.02%**; sampled 30-second CPU non-idle utilization peaked at
+23.74%. These smoothed readings cannot exclude short spikes. No additional
+restarts appeared in the surviving `shortlink` workload containers, and both new
+Fastify pods had zero restarts. Deployment availability and ready application
+endpoints were at least two in the one-second snapshots. All Fastify scrapes
+sampled every five seconds were successful, illustrating that scrape health can
+miss a short client-visible interruption. New monitoring overhead also differs
+between the two trials, so this is not a perfectly isolated RAM-only comparison.
+
+The repeat's artifacts are in
+`.kind/rolling-restart/2026-11-12T11-26-30-521Z/`: `run.json`, `summary.json`,
+`resource-report.json`, `resource-series.json`, `client-analysis.json`, shutdown
+logs, events, and the pod/endpoint timeline. The resource report includes a fixed
+dashboard time window. Both replacements were ready and `/readyz` returned `200`
+afterward. Further shutdown coordination work remains before claiming a
+zero-error restart at this load.
+
 ## Run the services on the host for development
 
 Prerequisites: Node.js 26.13.0, pnpm 12.18.0, Colima, Docker CLI, and Docker Compose.
