@@ -590,6 +590,49 @@ reported four CPUs afterward, with four allocatable Kubernetes CPUs. The local
 Gateway bridge was recreated to refresh Docker DNS with
 `docker compose -f deploy/kind/compose.yaml up -d --force-recreate`.
 
+## Continuous integration on GitHub Actions
+
+[CI runs](https://github.com/dentuzhik/shortlink/actions/workflows/ci.yaml) are
+configured in `.github/workflows/ci.yaml`. A push to `main`, any pull request, or
+manual dispatch starts the workflow. Node comes from `.node-version`, pnpm from
+`package.json`, and dependency installation uses the committed lockfile. Action
+versions are pinned to commit SHAs. Dependency and Docker layer caches reduce
+repeated downloads; newer runs supersede older runs for the same ref.
+
+| Job                                  | What it validates                                                                                                                                    |
+| :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application checks                   | Shared DB package build, lint, all workspace type checks, unit tests, release-helper tests, and production workspace builds including Next.js.       |
+| Postgres and Redis integration tests | Real disposable Postgres/Redis containers, database migrations, and the existing integration suite.                                                  |
+| Container image (`redirect`, `web`)  | Both Docker targets build after checks/tests pass; their revision labels match the tested Git SHA, and Fastify's baked runtime revision matches too. |
+
+The integration runner uses its own Docker daemon and Testcontainers databases;
+it does not connect to local development databases or the kind cluster. The
+workflow needs no database or registry secrets and has read-only repository
+permissions. It uses ordinary pull-request events so fork contributions execute
+with the corresponding restricted token.
+
+Container validation currently builds `linux/amd64` images on Ubuntu runners.
+These images remain on the temporary runner; registry publishing and deployment
+are separate future steps. The local Colima/kind environment uses ARM64, so a
+future publish/deploy workflow must explicitly choose the matching platform or
+publish a multi-platform artifact. CI does not alter the running local release.
+
+To reproduce the application checks locally:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm --filter @url-shortener/db build
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:release
+pnpm build
+pnpm test:integration
+```
+
+Workflow checks report results; requiring them before merging is a separate
+repository branch-protection/ruleset setting.
+
 ## Deploy a versioned Fastify image and roll back
 
 Release images use the **full Git commit SHA** as their tag. `git archive` supplies

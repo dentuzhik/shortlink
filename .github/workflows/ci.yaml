@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  checks:
+    name: Application checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build shared database package
+        run: pnpm --filter @url-shortener/db build
+      - name: Lint
+        run: pnpm lint
+      - name: Type check all workspaces
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Release verification tests
+        run: pnpm test:release
+      - name: Build all workspaces
+        run: pnpm build
+
+  integration:
+    name: Postgres and Redis integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify container runtime
+        run: docker info
+      - name: Run migrations and integration tests on disposable databases
+        run: pnpm test:integration
+
+  images:
+    name: Container image (${{ matrix.target }})
+    needs: [checks, integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [redirect, web]
+    env:
+      IMAGE_NAME: shortlink-${{ matrix.target }}
+      REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Build commit-tagged image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.REVISION }}
+          build-args: |
+            APP_REVISION=${{ env.REVISION }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.REVISION }}
+            org.opencontainers.image.source=https://github.com/dentuzhik/shortlink
+          cache-from: type=gha,scope=image-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.target }}
+      - name: Verify image revision label
+        run: |
+          actual_revision=$(docker image inspect "$IMAGE_NAME:$REVISION" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+          test "$actual_revision" = "$REVISION"
+      - name: Verify Fastify runtime revision
+        if: matrix.target == 'redirect'
+        run: |
+          docker run --rm --entrypoint node "$IMAGE_NAME:$REVISION" \
+            -e 'if (process.env.APP_REVISION !== process.argv[1]) throw new Error("Image revision mismatch")' \
+            "$REVISION"
