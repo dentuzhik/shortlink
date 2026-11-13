@@ -574,6 +574,21 @@ additional Prometheus overhead. All 293 existing links and the original Postgres
 Prometheus, and Grafana PVCs survived the VM restart. These checks do not establish
 the rolling-restart or throughput result at the larger allocation.
 
+The current persisted Colima allocation is now **4 CPUs / 4 GiB**; the later CPU
+comparison below records its restart-test results. The setting is stored in
+`~/.colima/default/colima.yaml` (`cpu: 4`, `memory: 4`), so subsequent plain
+`colima start` commands reuse it. The existing VM was resized with:
+
+```sh
+colima stop
+colima start --cpus 4 --memory 4
+```
+
+This restarts the VM and its workloads. Docker and the existing kind node both
+reported four CPUs afterward, with four allocatable Kubernetes CPUs. The local
+Gateway bridge was recreated to refresh Docker DNS with
+`docker compose -f deploy/kind/compose.yaml up -d --force-recreate`.
+
 ## Test a Fastify rolling restart
 
 With the Kubernetes stack running, apply the explicit rollout policy and run:
@@ -912,8 +927,64 @@ Artifacts are in `.kind/rolling-restart/2026-11-12T12-36-45-485Z/` and
 `.kind/rolling-restart/2026-11-12T12-39-22-155Z/`. In addition to the k6 summaries,
 all-pod logs, timeline and resource reports, they contain
 `checkout-diagnostics.json` and `checkout-metric-series.json` with rejection,
-cache and event-loop evidence. `last-run.json` now points to the failed
-reproduction. These measurements apply to the local VM and this traffic pattern.
+cache and event-loop evidence. These measurements apply to the local VM and this
+traffic pattern.
+
+### Four-CPU comparison
+
+Later on November 12, Colima was resized from **2 CPUs to 4 CPUs**, retaining
+**4 GiB** of configured memory. The existing kind cluster, Postgres, Prometheus
+and Grafana PVC identities were preserved. The API, UI and collectors recovered
+before testing; the Fastify container image ID matched all previous diagnostic
+trials. No application image rebuild, replica increase or protection tuning was
+performed: Fastify still runs two replicas with five pool connections each,
+128-waiter admission, a 50ms checkout deadline and a five-second drain.
+
+Two more 90-second trials used the same native k6 runner, preallocated worker
+counts, ten warmed redirect fixtures, 1,000 redirects/s plus 10 creations/s,
+Gateway route, restart timing and thresholds. Both passed every threshold:
+
+| Measurement                         | 2 CPUs, diagnostic 1 | 2 CPUs, diagnostic 2 | 4 CPUs, trial 1 | 4 CPUs, trial 2 |
+| :---------------------------------- | -------------------: | -------------------: | --------------: | --------------: |
+| Test result                         |                 PASS |                 FAIL |            PASS |            PASS |
+| Correct redirects                   |               90,001 |               89,875 |          90,001 |          90,001 |
+| Failed redirects                    |                    0 |                  126 |               0 |               0 |
+| Successful creations                |                  900 |                  900 |             901 |             900 |
+| Dropped starts                      |                    0 |                    0 |               0 |               0 |
+| Checkout timeouts                   |                    0 |                   37 |               0 |               0 |
+| Queue-full rejections               |                    0 |                    0 |               0 |               0 |
+| Redis read breaker openings         |                    0 |                    3 |               0 |               0 |
+| Restart-window redirect p99         |                25 ms |                96 ms |            5 ms |            6 ms |
+| Maximum redirect duration           |                75 ms |               361 ms |           36 ms |           50 ms |
+| Maximum sampled event-loop delay    |             30.34 ms |            111.35 ms |        17.06 ms |        24.08 ms |
+| Maximum 30s VM CPU non-idle average |               91.92% |               89.32% |          64.92% |          61.93% |
+| Maximum 30s CPU waiting pressure    |               84.04% |               84.93% |          43.26% |          42.31% |
+
+Across the four-CPU trials, **180,002 redirects were correct within 100ms** and
+**1,801 creations succeeded**, with no dropped starts or checkout rejections.
+The correct-within-100ms fraction was 100% in every reporting phase in each
+trial. Available VM memory stayed above 1.93 GiB. Each run retained at least two
+sampled available replicas and ready endpoints, recorded no additional surviving
+container restarts during the test, and finished with two healthy replacement
+pods. VM boot-related restarts occurred before the measurement windows.
+
+The reduced event-loop delay, CPU waiting pressure and absence of fallback bursts
+support CPU scheduling contention as a contributor to the earlier failure at
+this local load. They do not isolate a single cause: the two-CPU behavior was
+intermittent, the comparison occurred later, and the required VM reboot restarted
+processes and cache state. Each trial recreated and warmed its own fixtures.
+Four CPUs are the current tested allocation, not a measured optimum or a newly
+established throughput ceiling. The 50ms protection deadline remains unchanged.
+
+Resize identity snapshots and the four-trial summary are saved under
+`.kind/cpu-comparison/`, including `comparison.json`. New run artifacts are in
+`.kind/rolling-restart/2026-11-12T19-24-15-533Z/` and
+`.kind/rolling-restart/2026-11-12T19-26-11-400Z/`; each includes client results,
+all-pod logs, resource history, drain evidence and checkout diagnostics. The
+resource report verifies four VM CPUs throughout each run. Checkout analysis
+filters scrape addresses using the trial's pod timeline so older IP series
+retained after the VM reboot do not inflate the rejection counts.
+`last-run.json` points to the second passing four-CPU trial.
 
 ## Run the services on the host for development
 
