@@ -102,10 +102,16 @@ spec:
       labels:
         app: web
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: web
           image: shortlink-web:local
           imagePullPolicy: Never
+          lifecycle:
+            preStop:
+              # Serve stale routes while Gateway endpoint changes propagate.
+              sleep:
+                seconds: 5
           env:
             - name: SHORT_LINK_ORIGIN
               value: http://go.localhost:8080

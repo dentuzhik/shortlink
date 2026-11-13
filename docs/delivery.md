@@ -120,7 +120,10 @@ SHORT_LINK_ORIGIN=https://links.example.com pnpm k8s:deploy:web <git-commit>
 This rolls the web pods without rebuilding the image. The hostname must also have
 working DNS, Gateway routing and TLS in the destination environment; the variable
 only controls generated links. Rollback restores the entire previous pod template,
-including its hostname value. Web verification checks the ready pods' actual
+including its hostname value and drain hook. The web Deployment uses the same
+five-second `preStop.sleep` routing handoff as Fastify, inside the 30-second
+termination grace. This keeps an outgoing web pod serving while endpoint changes
+propagate before Next.js receives `SIGTERM`. Web verification checks the ready pods' actual
 digests and baked `APP_REVISION`; Fastify also reports its running build-info metric.
 
 `k8s:deploy` resolves the commit tag to its registry index digest, selects the
@@ -175,6 +178,29 @@ restores the previous policy along with its image and other pod-template setting
 
 Checks: `pnpm test:release` verifies rollback selection, artifact mismatches, pod
 readiness and version parsing; the app tests verify isolated version metrics.
+
+### Verified UI deployment exercise
+
+On November 13, 2026, CI for `594f262` passed all eight jobs, including starting
+the same UI image with two different runtime origins on both AMD64 and ARM64.
+The browser created a link through the published UI and Next.js GraphQL rewrite;
+the resulting short URL returned the expected `302`, destination and `no-store`.
+The running UI digest and baked revision were checked after each rollout.
+
+The first continuity probe recorded 4 failures in 2,108 checks: three UI timeouts
+and one UI `502`, all during replacement; redirects remained correct. At that
+point web had no drain hook. After adding the existing five-second drain pattern
+to both retained web templates, the same image pair (`befb121` → `594f262` →
+`befb121` → `594f262`) passed **631 UI checks and 631 redirect checks with zero
+failures**. This supports the shutdown/routing handoff diagnosis. It is a low-rate
+functional check, not a throughput or latency qualification.
+
+Both reports remain in `.kind/releases/`: the initial run is
+`ui-exercise-2026-11-13T09-31-13-954Z/`, and the controlled repeat is
+`ui-exercise-2026-11-13T09-38-41-056Z/`. Each includes its baseline and rollout
+records. Earlier retained templates can lack the drain hook; use a known drained
+baseline for rollback, or deploy an older image through the current helper to
+apply current deployment settings.
 
 ### Verified versioned deployment exercise
 

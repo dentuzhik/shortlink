@@ -392,6 +392,7 @@ if (action === "status") {
           imagePullPolicy: action === "deploy" ? "IfNotPresent" : "Never",
         };
         if (target === "web") {
+          container.lifecycle = { preStop: { sleep: { seconds: 5 } } };
           const previous = deployment.spec.template.spec.containers
             .find((item) => item.name === "web")
             ?.env?.find((item) => item.name === "SHORT_LINK_ORIGIN");
