@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { readDatabaseUrl } from "./database.js";
 
+const revision = process.env.APP_REVISION ?? "development";
 const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   poolMax: Number(process.env.DB_POOL_MAX ?? 5),
   reportPoolWait: process.env.DB_POOL_TIMING === "1",
@@ -11,7 +12,7 @@ const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   redirectCheckoutTimeoutMs: Number(
     process.env.REDIRECT_DB_CHECKOUT_TIMEOUT_MS ?? 50,
   ),
-  revision: process.env.APP_REVISION ?? "development",
+  revision,
 });
 
 async function shutdown(signal: string) {
@@ -37,6 +38,7 @@ try {
     host: process.env.LISTEN_HOST ?? "127.0.0.1",
     port: 3000,
   });
+  app.log.info({ revision }, "Application started");
 } catch (error) {
   app.log.error(error);
   await app.close();

@@ -589,6 +589,65 @@ reported four CPUs afterward, with four allocatable Kubernetes CPUs. The local
 Gateway bridge was recreated to refresh Docker DNS with
 `docker compose -f deploy/kind/compose.yaml up -d --force-recreate`.
 
+## Deploy a versioned Fastify image and roll back
+
+Release images use the **full Git commit SHA** as their tag. `git archive` supplies
+Docker with the committed snapshot, excluding working-tree changes and ignored
+local files. The builder supplies `APP_REVISION` and the OCI revision label; the
+app exposes `shortlink_build_info{revision="<sha>"} 1` on its internal metrics
+listener. Development/Compose builds without a release revision report
+`development`. Candidate releases also log their revision with `Application started`.
+
+With the existing kind stack running:
+
+```sh
+pnpm image:redirect              # build committed HEAD, without deploying
+pnpm k8s:deploy                  # build/reuse HEAD, load into kind, roll out
+pnpm k8s:version                 # rollout history and per-pod version checks
+pnpm k8s:rollback                # roll back to the previous retained revision
+pnpm k8s:rollback 18             # or choose a Kubernetes rollout revision
+```
+
+`image:redirect` and `k8s:deploy` also accept an explicit Git commit. Default HEAD
+builds require a clean working tree; an explicit commit always builds its archive,
+so local uncommitted work is deliberately excluded. Existing SHA-tagged images
+are reused after metadata checks and never overwritten by this workflow.
+The script targets only `kind-shortlink`, namespace `shortlink`, Deployment
+`redirect-service` and container `api`; it does not publish images to a registry.
+
+A **Git SHA identifies source**. A **Kubernetes revision identifies a pod-template
+rollout**; a restart can create another rollout of the same Git version. Deploy
+changes the image and records its source and actual kind image digest in pod
+annotations, preserving the two-replica rollout strategy and drain hook. It waits
+for the rollout, then checks each non-terminating pod's readiness, image reference,
+actual image digest and self-reported metric. It does not infer success from one
+request through a load-balanced Service.
+
+Rollback selects a ReplicaSet owned by this Deployment, verifies the retained
+artifact against that revision's digest, and uses `kubectl rollout undo` to restore
+the earlier pod template. It does not rebuild a previous release or reverse the
+database. Legacy `:local` revisions lack verified release metadata and are not
+accepted by the rollback helper; establish a versioned baseline before testing a
+candidate. A failed check exits nonzero and preserves evidence rather than
+silently declaring success or automatically rolling back.
+
+Operation reports are saved to `.kind/releases/<timestamp>-<action>/operation.json`;
+`.kind/releases/latest.json` points to the latest build/deploy/rollback report.
+In Grafana Explore, use `shortlink_build_info{job="redirect-service"}` to see source
+revisions per pod across the chosen time range. Historical versions can remain
+visible after a rollout.
+
+This increment changes no database schema. Release commands do not run migrations;
+coordinating schema changes is a separate deployment step. `pnpm k8s:up` remains
+the full-stack development bootstrap and applies `:local` images, so use
+`k8s:deploy` for versioned application updates after bootstrap. The local kind
+image policy remains `Never`; CI image publishing and registry policy are a later
+integration step. Commit tags plus retained-digest checks are a local workflow
+convention, not a registry-enforced immutable-tag policy.
+
+Checks: `pnpm test:release` verifies rollback selection, artifact mismatches, pod
+readiness and version parsing; the app tests verify isolated version metrics.
+
 ## Test a Fastify rolling restart
 
 With the Kubernetes stack running, apply the explicit rollout policy and run:

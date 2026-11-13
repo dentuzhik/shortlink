@@ -31,7 +31,12 @@
     "db:migrate": "pnpm --filter @url-shortener/db migrate",
     "db:studio": "pnpm --filter @url-shortener/db exec drizzle-kit studio --host=127.0.0.1",
     "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres"
+    "db:logs": "docker compose logs -f postgres",
+    "image:redirect": "node scripts/release-redirect.mjs build",
+    "k8s:deploy": "node scripts/release-redirect.mjs deploy",
+    "k8s:rollback": "node scripts/release-redirect.mjs rollback",
+    "k8s:version": "node scripts/release-redirect.mjs status",
+    "test:release": "node --test scripts/test/redirect-release.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
