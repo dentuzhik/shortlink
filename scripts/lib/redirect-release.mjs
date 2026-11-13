@@ -1,7 +1,12 @@
 export function imageRevision(image) {
-  const match = /^shortlink-redirect:([a-f0-9]{40})$/.exec(image);
+  const match =
+    /^(?:shortlink-redirect|ghcr\.io\/dentuzhik\/shortlink-redirect):([a-f0-9]{40})(?:@(sha256:[a-f0-9]{64}))?$/.exec(
+      image,
+    );
   if (!match)
     throw new Error(`Expected a commit-tagged Fastify image, got ${image}`);
+  if (image.startsWith("ghcr.io/") && !match[2])
+    throw new Error("Published releases must pin a registry digest");
   return match[1];
 }
 
@@ -19,11 +24,10 @@ export function templateRelease(template) {
   const annotations = template.metadata.annotations ?? {};
   if (annotations["shortlink.dev/git-revision"] !== revision)
     throw new Error("Pod template revision does not match its image tag");
-  return {
-    image,
-    revision,
-    digest: imageDigest(annotations["shortlink.dev/image-digest"]),
-  };
+  const digest = imageDigest(annotations["shortlink.dev/image-digest"]);
+  if (image.includes("@") && imageDigest(image) !== digest)
+    throw new Error("Pod template digest does not match its pinned image");
+  return { image, revision, digest };
 }
 
 export function rollbackTarget(deployment, replicaSets, requested) {

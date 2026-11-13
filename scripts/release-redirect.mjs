@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
+  platformDigest,
+  redirectRepository,
+  verifyImageMetadata,
+} from "./lib/published-image.mjs";
+import {
   imageDigest,
   imageRevision,
   reportedRevision,
@@ -29,9 +34,12 @@ const kube = (...args) => output("kubectl", [...kubeArgs, ...args]);
 const kubeJson = async (...args) =>
   JSON.parse(await kube(...args, "-o", "json"));
 const [action, argument, ...extra] = process.argv.slice(2);
-if (!["build", "deploy", "rollback", "status"].includes(action) || extra.length)
+if (
+  !["build", "deploy", "deploy-local", "rollback", "status"].includes(action) ||
+  extra.length
+)
   throw new Error(
-    "Usage: release-redirect.mjs build|deploy [git-commit] | rollback [kubernetes-revision] | status",
+    "Usage: release-redirect.mjs build|deploy|deploy-local [git-commit] | rollback [kubernetes-revision] | status",
   );
 
 async function run(command, args, inputFile) {
@@ -60,6 +68,65 @@ async function optionalJson(command, args) {
       return undefined;
     throw error;
   }
+}
+
+async function nodeArchitecture() {
+  return (
+    await kube(
+      "get",
+      "node",
+      "shortlink-control-plane",
+      "-o",
+      "jsonpath={.status.nodeInfo.architecture}",
+    )
+  ).trim();
+}
+
+async function pullPublished(release) {
+  const architecture = await nodeArchitecture();
+  await run("docker", [
+    "pull",
+    "--platform",
+    `linux/${architecture}`,
+    release.image,
+  ]);
+  const [info] = JSON.parse(
+    await output("docker", ["image", "inspect", release.image]),
+  );
+  verifyImageMetadata(info, release.revision, architecture);
+}
+
+async function published(ref) {
+  const revision = (
+    await output("git", ["rev-parse", "--verify", `${ref ?? "HEAD"}^{commit}`])
+  ).trim();
+  const tag = `${redirectRepository}:${revision}`;
+  const indexDigest = imageDigest(
+    (
+      await output("docker", [
+        "buildx",
+        "imagetools",
+        "inspect",
+        tag,
+        "--format",
+        "{{.Manifest.Digest}}",
+      ])
+    ).trim(),
+  );
+  const index = JSON.parse(
+    await output("docker", [
+      "buildx",
+      "imagetools",
+      "inspect",
+      `${redirectRepository}@${indexDigest}`,
+      "--raw",
+    ]),
+  );
+  const digest = platformDigest(index, await nodeArchitecture());
+  const release = { image: `${tag}@${digest}`, revision, digest, indexDigest };
+  imageRevision(release.image);
+  await pullPublished(release);
+  return release;
 }
 
 async function build(ref) {
@@ -289,9 +356,13 @@ if (action === "status") {
         kubernetesRevision:
           deployment.metadata.annotations["deployment.kubernetes.io/revision"],
       };
-      if (action === "deploy") {
-        report.release = await build(argument);
-        report.release.digest = await load(report.release.image);
+      if (action === "deploy" || action === "deploy-local") {
+        if (action === "deploy") {
+          report.release = await published(argument);
+        } else {
+          report.release = await build(argument);
+          report.release.digest = await load(report.release.image);
+        }
         const { image, revision, digest } = report.release;
         await kube(
           "patch",
@@ -311,9 +382,20 @@ if (action === "status") {
                   annotations: {
                     "shortlink.dev/git-revision": revision,
                     "shortlink.dev/image-digest": digest,
+                    "shortlink.dev/registry-index-digest":
+                      report.release.indexDigest ?? null,
                   },
                 },
-                spec: { containers: [{ name: "api", image }] },
+                spec: {
+                  containers: [
+                    {
+                      name: "api",
+                      image,
+                      imagePullPolicy:
+                        action === "deploy" ? "IfNotPresent" : "Never",
+                    },
+                  ],
+                },
               },
             },
           }),
@@ -323,7 +405,11 @@ if (action === "status") {
           await kubeJson("get", "replicasets", "-l", "app=redirect-service")
         ).items;
         report.release = rollbackTarget(deployment, sets, argument);
-        await load(report.release.image, report.release.digest);
+        if (report.release.image.startsWith("ghcr.io/")) {
+          await pullPublished(report.release);
+        } else {
+          await load(report.release.image, report.release.digest);
+        }
         await kube(
           "rollout",
           "undo",

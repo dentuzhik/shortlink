@@ -21,6 +21,10 @@ Docker TCP bridge on `127.0.0.1:8080`. You can close the terminal; no interactiv
 port-forward is required. The kubeconfig stays in the ignored `.kind/` directory,
 so the commands do not switch your default Kubernetes context.
 The same command also provisions local Prometheus and Grafana monitoring.
+It applies locally built `:local` images with pull policy `Never`. To deploy
+CI-published Fastify images afterward, use `pnpm k8s:deploy <commit>`; that path
+pins a public GHCR digest and changes the API pull policy to `IfNotPresent`.
+See [delivery and rollback](delivery.md).
 
 The existing kind node was created without a Docker mapping for HTTP traffic.
 The bridge connects to its NodePort over Docker's `kind` network, preserving the

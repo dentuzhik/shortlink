@@ -24,6 +24,9 @@ ENTRYPOINT ["sh", "/app/scripts/container-db.sh"]
 CMD ["node", "apps/redirect-service/dist/server.js"]
 
 FROM workspace AS web
+ARG APP_REVISION=development
+LABEL org.opencontainers.image.revision=${APP_REVISION}
+ENV APP_REVISION=${APP_REVISION}
 ARG REDIRECT_SERVICE_ORIGIN=http://redirect-service:3000
 ARG NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://127.0.0.1:3100
 ENV NEXT_TELEMETRY_DISABLED=1 \

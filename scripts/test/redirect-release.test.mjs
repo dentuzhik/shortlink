@@ -127,3 +127,20 @@ test("the running revision must come from a build-info sample, not a comment or 
     /does not report/,
   );
 });
+
+test("registry releases require a digest matching the pod template", () => {
+  const registry = structuredClone(template);
+  registry.spec.containers[0].image = `ghcr.io/dentuzhik/shortlink-redirect:${revision}@${digest}`;
+  assert.equal(templateRelease(registry).digest, digest);
+  assert.equal(imageRevision(registry.spec.containers[0].image), revision);
+  registry.metadata.annotations["shortlink.dev/image-digest"] =
+    `sha256:${"c".repeat(64)}`;
+  assert.throws(
+    () => templateRelease(registry),
+    /does not match its pinned image/,
+  );
+  assert.throws(
+    () => imageRevision(`ghcr.io/dentuzhik/shortlink-redirect:${revision}`),
+    /must pin/,
+  );
+});

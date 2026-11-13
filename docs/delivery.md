@@ -11,23 +11,47 @@ manual dispatch starts the workflow. Node comes from `.node-version`, pnpm from
 versions are pinned to commit SHAs. Dependency and Docker layer caches reduce
 repeated downloads; newer runs supersede older runs for the same ref.
 
-| Job                                  | What it validates                                                                                                                                    |
-| :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application checks                   | Shared DB package build, lint, all workspace type checks, unit tests, release-helper tests, and production workspace builds including Next.js.       |
-| Postgres and Redis integration tests | Real disposable Postgres/Redis containers, database migrations, and the existing integration suite.                                                  |
-| Container image (`redirect`, `web`)  | Both Docker targets build after checks/tests pass; their revision labels match the tested Git SHA, and Fastify's baked runtime revision matches too. |
+| Job                                    | What it validates                                                                                                                              |
+| :------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application checks                     | Shared DB build, lint, workspace type checks, unit/release tests and production builds including Next.js.                                      |
+| Postgres and Redis integration tests   | Disposable databases, real migrations and the integration suite.                                                                               |
+| Container image (target, architecture) | Four native builds: Fastify and Next.js on AMD64 and ARM64. Each image's revision label, architecture and baked runtime revision are verified. |
+| Publish multi-platform image (target)  | Combines the exact verified platform indexes, preserving provenance, into one full-commit tag; verifies both resulting platform digests.       |
 
-The integration runner uses its own Docker daemon and Testcontainers databases;
-it does not connect to local development databases or the kind cluster. The
-workflow needs no database or registry secrets and has read-only repository
-permissions. It uses ordinary pull-request events so fork contributions execute
-with the corresponding restricted token.
+Pull requests build and validate images without publishing. Successful `main`
+pushes and manual runs on `main` publish:
 
-Container validation currently builds `linux/amd64` images on Ubuntu runners.
-These images remain on the temporary runner; registry publishing and deployment
-are separate future steps. The local Colima/kind environment uses ARM64, so a
-future publish/deploy workflow must explicitly choose the matching platform or
-publish a multi-platform artifact. CI does not alter the running local release.
+- `ghcr.io/dentuzhik/shortlink-redirect:<full-git-sha>`
+- `ghcr.io/dentuzhik/shortlink-web:<full-git-sha>`
+
+Each tag points to a multi-platform index for `linux/amd64` and `linux/arm64`.
+Native runners avoid emulation. CI builds each platform once and pushes it under
+a unique run/platform tag with build provenance. After pulling and validating it,
+the final publish job combines its exact index digest without rebuilding. Run
+artifacts and job summaries record index and platform digests. Temporary run tags
+can exist even when subsequent validation fails; only a fully successful set of
+platform checks permits publication of the commit tag.
+
+Publishing jobs use `GITHUB_TOKEN` with `packages: write`, so no registry secret
+is required. The integration runner has its own Docker/Testcontainers databases;
+it never connects to local databases or Kubernetes. Pull requests use ordinary
+`pull_request` events and fork tokens retain GitHub's restrictions.
+
+**Visibility:** these packages are intended to be public, allowing anonymous
+pulls. GHCR initially creates new packages as private even for a public source
+repository. After the first push, set each package's Settings → Change visibility
+to Public. Later versions inherit the package visibility. Public images require
+no local registry credential or Kubernetes pull secret.
+
+The published web image currently compiles
+`NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080`, matching our local
+Gateway. Its GraphQL rewrite targets the internal `redirect-service:3000` Service.
+Another public hostname requires a new web build; runtime environment variables
+do not rewrite a Next.js browser bundle.
+
+CI publishes artifacts; deployment remains an explicit local command. A commit
+tag is a source convention, not an immutable registry policy: a rerun can replace
+the tag. Pinning a digest keeps an already selected release unchanged.
 
 To reproduce the application checks locally:
 
@@ -49,29 +73,40 @@ The first published run for `cfc81a1` passed all four jobs on November 13, 2026:
 
 ## Deploy a versioned Fastify image and roll back
 
-Release images use the **full Git commit SHA** as their tag. `git archive` supplies
-Docker with the committed snapshot, excluding working-tree changes and ignored
-local files. The builder supplies `APP_REVISION` and the OCI revision label; the
-app exposes `shortlink_build_info{revision="<sha>"} 1` on its internal metrics
-listener. Development/Compose builds without a release revision report
-`development`. Candidate releases also log their revision with `Application started`.
+Release images carry the **full Git commit SHA** as their tag and a baked
+`APP_REVISION` plus OCI revision label. Fastify reports
+`shortlink_build_info{revision="<sha>"} 1` on its internal metrics listener and
+logs the revision on startup. Development/Compose builds report `development`.
 
-With the existing kind stack running:
+After CI publishes a commit, with the kind stack running:
 
 ```sh
-pnpm image:redirect              # build committed HEAD, without deploying
-pnpm k8s:deploy                  # build/reuse HEAD, load into kind, roll out
-pnpm k8s:version                 # rollout history and per-pod version checks
-pnpm k8s:rollback                # roll back to the previous retained revision
-pnpm k8s:rollback 20             # example: choose a retained revision from history
+pnpm k8s:deploy                  # pull published HEAD and roll out Fastify
+pnpm k8s:deploy <git-commit>      # choose another published commit
+pnpm k8s:version                 # history and per-pod version/digest checks
+pnpm k8s:rollback                # restore the previous retained revision
+pnpm k8s:rollback 20             # example: choose a revision from history
 ```
 
-`image:redirect` and `k8s:deploy` also accept an explicit Git commit. Default HEAD
-builds require a clean working tree; an explicit commit always builds its archive,
-so local uncommitted work is deliberately excluded. Existing SHA-tagged images
-are reused after metadata checks and never overwritten by this workflow.
-The script targets only `kind-shortlink`, namespace `shortlink`, Deployment
-`redirect-service` and container `api`; it does not publish images to a registry.
+`k8s:deploy` resolves the commit tag to its registry index digest, selects the
+kind node's platform digest, pulls and checks that image's platform and baked
+revision, then patches the Deployment to `repository:<sha>@sha256:<digest>` with
+`imagePullPolicy: IfNotPresent`. The kubelet pulls the public artifact directly.
+It never compiles local application code. Uncommitted edits are not included.
+A missing/private image or a mismatched revision fails before deployment changes.
+
+Local builds remain an explicit alternative:
+
+```sh
+pnpm image:redirect              # build committed HEAD without deploying
+pnpm k8s:deploy:local            # build/load HEAD into kind, then roll out
+pnpm k8s:deploy:local <commit>    # build an archived committed snapshot
+```
+
+These local commands use `git archive`, require a clean tree for implicit HEAD,
+and retain the `Never` pull policy. Existing local SHA tags are checked and
+reused rather than overwritten. Both paths target only context `kind-shortlink`,
+namespace `shortlink`, Deployment `redirect-service`, container `api`.
 
 A **Git SHA identifies source**. A **Kubernetes revision identifies a pod-template
 rollout**; a restart can create another rollout of the same Git version. Deploy
@@ -82,7 +117,7 @@ actual image digest and self-reported metric. It does not infer success from one
 request through a load-balanced Service.
 
 Rollback selects a ReplicaSet owned by this Deployment, verifies the retained
-artifact against that revision's digest, and uses `kubectl rollout undo` to restore
+artifact against that revision's digest (pulling published images by digest), and uses `kubectl rollout undo` to restore
 the earlier pod template. It does not rebuild a previous release or reverse the
 database. Legacy `:local` revisions lack verified release metadata and are not
 accepted by the rollback helper; establish a versioned baseline before testing a
@@ -98,10 +133,9 @@ visible after a rollout.
 This increment changes no database schema. Release commands do not run migrations;
 coordinating schema changes is a separate deployment step. `pnpm k8s:up` remains
 the full-stack development bootstrap and applies `:local` images, so use
-`k8s:deploy` for versioned application updates after bootstrap. The local kind
-image policy remains `Never`; CI image publishing and registry policy are a later
-integration step. Commit tags plus retained-digest checks are a local workflow
-convention, not a registry-enforced immutable-tag policy.
+`k8s:deploy` for versioned application updates after bootstrap. Bootstrap uses locally loaded images with policy `Never`; registry deployments
+use `IfNotPresent`. A later `k8s:up` reapplies the development manifests. Rollback
+restores the previous policy along with its image and other pod-template settings.
 
 Checks: `pnpm test:release` verifies rollback selection, artifact mismatches, pod
 readiness and version parsing; the app tests verify isolated version metrics.
@@ -118,7 +152,7 @@ On November 13, the versioned workflow was exercised against the existing
 | Roll back to A       | `4cd4bc0`    |                  20 | Original A artifact restored; both pods verified   |
 | Restore candidate B  | `c6caad2`    |                  21 | Retained B artifact reused; both pods verified     |
 
-The final running version is `c6caad20dd3c613481ec2b7123ec57dba06002f5`.
+The final version of that exercise was `c6caad20dd3c613481ec2b7123ec57dba06002f5`.
 Rollback created a new Kubernetes revision (20), rather than resetting the
 revision counter to 18. Subsequent rollouts can update the revision numbers
 retained in history; choose rollback numbers using `pnpm k8s:version`.

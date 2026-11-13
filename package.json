@@ -34,9 +34,10 @@
     "db:logs": "docker compose logs -f postgres",
     "image:redirect": "node scripts/release-redirect.mjs build",
     "k8s:deploy": "node scripts/release-redirect.mjs deploy",
+    "k8s:deploy:local": "node scripts/release-redirect.mjs deploy-local",
     "k8s:rollback": "node scripts/release-redirect.mjs rollback",
     "k8s:version": "node scripts/release-redirect.mjs status",
-    "test:release": "node --test scripts/test/redirect-release.test.mjs"
+    "test:release": "node --test scripts/test/*.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

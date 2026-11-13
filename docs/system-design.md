@@ -171,15 +171,17 @@ allocation were introduced and the scope in which they passed.
 
 ## Versioned artifacts and verified rollback
 
-Release builds use `git archive` for an exact committed source snapshot, a full
-commit-SHA image tag and a baked revision value. The deployment workflow records
+CI builds tested commits into GHCR images for AMD64 and ARM64, with a full
+commit-SHA tag and baked revision. Registry deployments select and pin the node
+platform digest. An explicit local build path uses `git archive` for an exact
+committed snapshot. The deployment workflow records
 and checks image digests as well as each pod's own build-info metric. Rollback
 restores a retained pod template and verifies the previous artifact in every
 serving replica.
 
 Git revisions identify source; Kubernetes revisions identify rollouts. Rollback
-does not undo database migrations. Tags are preserved by the local helper's
-convention and checks; a registry-enforced immutable-tag policy is not configured.
+does not undo database migrations. Commit tags can move on a CI rerun; digest references preserve the selected
+artifact. A registry-enforced immutable-tag policy is not configured.
 
 Code: [release commands](../scripts/release-redirect.mjs),
 [verification rules](../scripts/lib/redirect-release.mjs),
@@ -210,7 +212,7 @@ See [observability](observability.md) and [performance](performance.md).
 - Warming Redis on successful link creation.
 - Postgres replication/failover and a read-after-write policy for replica reads.
 - A demonstrated expand/backfill/contract schema migration across app versions.
-- Publishing CI-built images to a registry and automatically deploying them.
+- Automatically deploying CI-published images (local deployment is manual).
 
 The current Postgres Deployment has one instance and a persistent volume.
 Adding ordinary Deployment replicas would not configure replication or failover.
