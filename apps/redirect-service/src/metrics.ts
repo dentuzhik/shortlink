@@ -6,9 +6,19 @@ import type { RedirectCheckoutObservation } from "./redirect-admission.js";
 
 type PoolState = Pick<Pool, "totalCount" | "idleCount" | "waitingCount">;
 
-export function registerMetrics(app: FastifyInstance, pool: PoolState) {
+export function registerMetrics(
+  app: FastifyInstance,
+  pool: PoolState,
+  revision = "development",
+) {
   // Each app owns a registry, just as it owns its database pool.
   const registry = new Registry();
+  new Gauge({
+    name: "shortlink_build_info",
+    help: "Git revision baked into this Fastify image; development for unversioned builds.",
+    labelNames: ["revision"] as const,
+    registers: [registry],
+  }).set({ revision }, 1);
   const checkoutRejections = new Counter({
     name: "shortlink_redirect_db_checkout_rejections_total",
     help: "Rejected database checkout attempts, before coalesced HTTP followers.",

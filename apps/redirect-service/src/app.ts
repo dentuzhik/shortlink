@@ -18,6 +18,7 @@ export function buildApp(
     reportCacheHit = false,
     redirectMaxWaiters = 128,
     redirectCheckoutTimeoutMs = 50,
+    revision = "development",
   } = {},
 ) {
   const app = Fastify({
@@ -25,7 +26,7 @@ export function buildApp(
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
   const pool = createDatabasePool(databaseUrl, poolMax);
-  const metrics = registerMetrics(app, pool);
+  const metrics = registerMetrics(app, pool, revision);
   const metricsServer = metrics.server;
   app.decorate("metricsServer", metricsServer);
   const checkoutRedirect = createRedirectCheckout(

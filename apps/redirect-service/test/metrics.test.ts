@@ -5,10 +5,10 @@ import { registerMetrics } from "../src/metrics.js";
 import { registerRedirectRoute } from "../src/redirect.js";
 import { RedirectPoolBusyError } from "../src/redirect-admission.js";
 
-function setup() {
+function setup(revision = "development") {
   const app = Fastify();
   const pool = { totalCount: 3, idleCount: 1, waitingCount: 4 };
-  const diagnostics = registerMetrics(app, pool);
+  const diagnostics = registerMetrics(app, pool, revision);
   const metrics = diagnostics.server;
   onTestFinished(async () => {
     await app.close();
@@ -61,6 +61,21 @@ function sample(
 }
 
 describe("application metrics", () => {
+  test("reports the build revision independently for each pod registry", async () => {
+    const first = setup("a".repeat(40));
+    const second = setup("b".repeat(40));
+    const firstBody = await first.scrape();
+    const secondBody = await second.scrape();
+    expect(
+      sample(firstBody, "shortlink_build_info", { revision: "a".repeat(40) }),
+    ).toBe(1);
+    expect(firstBody).not.toContain(`revision="${"b".repeat(40)}"`);
+    expect(
+      sample(secondBody, "shortlink_build_info", { revision: "b".repeat(40) }),
+    ).toBe(1);
+    expect(secondBody).not.toContain(`revision="${"a".repeat(40)}"`);
+  });
+
   test("counts checkout rejections once per lookup and separates Redis read outcomes", async () => {
     const { diagnostics, scrape } = setup();
     for (const outcome of [

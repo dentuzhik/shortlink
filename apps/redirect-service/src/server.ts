@@ -11,6 +11,7 @@ const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   redirectCheckoutTimeoutMs: Number(
     process.env.REDIRECT_DB_CHECKOUT_TIMEOUT_MS ?? 50,
   ),
+  revision: process.env.APP_REVISION ?? "development",
 });
 
 async function shutdown(signal: string) {

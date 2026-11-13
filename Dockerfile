@@ -16,7 +16,9 @@ COPY --chown=node:node . .
 
 FROM workspace AS redirect
 RUN pnpm --filter @url-shortener/redirect-service... build
-ENV NODE_ENV=production LISTEN_HOST=0.0.0.0
+ARG APP_REVISION=development
+LABEL org.opencontainers.image.revision=${APP_REVISION}
+ENV NODE_ENV=production LISTEN_HOST=0.0.0.0 APP_REVISION=${APP_REVISION}
 EXPOSE 3000 9090
 ENTRYPOINT ["sh", "/app/scripts/container-db.sh"]
 CMD ["node", "apps/redirect-service/dist/server.js"]
