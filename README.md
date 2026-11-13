@@ -238,6 +238,7 @@ duration. A second Fastify listener serves the registry at `/metrics` on port
 | `shortlink_http_request_duration_seconds`         | Histogram | Response durations in seconds, using the same labels.                                          |
 | `shortlink_db_pool_connections`                   | Gauge     | Existing pool clients with `state="idle"` or `state="in_use"`.                                 |
 | `shortlink_db_pool_waiting_requests`              | Gauge     | Checkouts currently waiting in the pg pool queue.                                              |
+| `shortlink_build_info`                            | Gauge     | One sample with the running image Git revision (or `development`) as its label.                |
 | `shortlink_redirect_db_checkout_rejections_total` | Counter   | Rejected checkout attempts by `reason="queue_full"` or `"timeout"`.                            |
 | `shortlink_redirect_db_checkout_duration_seconds` | Histogram | Checkout elapsed time by `outcome="acquired"`, `"queue_full"`, `"timeout"`, or `"error"`.      |
 | `shortlink_redirect_redis_reads_total`            | Counter   | Cache read outcomes: `hit`, `miss`, or `unavailable` (failed reads and circuit bypasses).      |
@@ -605,7 +606,7 @@ pnpm image:redirect              # build committed HEAD, without deploying
 pnpm k8s:deploy                  # build/reuse HEAD, load into kind, roll out
 pnpm k8s:version                 # rollout history and per-pod version checks
 pnpm k8s:rollback                # roll back to the previous retained revision
-pnpm k8s:rollback 18             # or choose a Kubernetes rollout revision
+pnpm k8s:rollback 20             # example: choose a retained revision from history
 ```
 
 `image:redirect` and `k8s:deploy` also accept an explicit Git commit. Default HEAD
@@ -647,6 +648,56 @@ convention, not a registry-enforced immutable-tag policy.
 
 Checks: `pnpm test:release` verifies rollback selection, artifact mismatches, pod
 readiness and version parsing; the app tests verify isolated version metrics.
+
+### Verified versioned deployment exercise
+
+On November 13, the versioned workflow was exercised against the existing
+4-CPU / 4-GiB local cluster with no schema changes:
+
+| Step                 | Git revision | Kubernetes revision | Result                                             |
+| :------------------- | :----------- | ------------------: | :------------------------------------------------- |
+| Establish baseline A | `4cd4bc0`    |                  18 | Both ready pods reported A and its recorded digest |
+| Deploy candidate B   | `c6caad2`    |                  19 | Both ready pods reported B and its recorded digest |
+| Roll back to A       | `4cd4bc0`    |                  20 | Original A artifact restored; both pods verified   |
+| Restore candidate B  | `c6caad2`    |                  21 | Retained B artifact reused; both pods verified     |
+
+The final running version is `c6caad20dd3c613481ec2b7123ec57dba06002f5`.
+Rollback created a new Kubernetes revision (20), rather than resetting the
+revision counter to 18. Subsequent rollouts can update the revision numbers
+retained in history; choose rollback numbers using `pnpm k8s:version`.
+
+A low-rate functional continuity probe recorded **3,744 redirects, all correct**,
+while building/deploying B, rolling back and restoring B. It checked `302`, the
+stored destination and `Cache-Control: no-store`; the fixture remained usable
+across all releases. This is a functional smoke exercise, with the prior
+four-CPU load trials providing the separate performance evidence. Both B pods'
+startup logs also reported the expected full commit SHA.
+
+Validation passed 29 application unit tests, all 14 real Postgres/Redis
+integration tests, six release-verification tests, type checking and lint. The
+initial platform identity check exposed an implementation mismatch before
+Deployment mutation: Docker reported an OCI index ID, while CRI reported a
+platform configuration ID. The corrected workflow hashes the platform config
+from the saved image archive and compares that with CRI, then checks the actual
+running pod digest and self-reported revision after rollout.
+
+The implementation is committed so image tags identify the source actually
+built. Review it with `git diff 13619e9..c6caad2`; this includes the version-metric
+baseline, release workflow, tests and platform identity fix. The earlier CPU
+comparison notes were checkpointed separately in `13619e9`. Measurement notes
+from this exercise remain available for review as a working-tree diff.
+
+Evidence is in `.kind/releases/exercise-2026-11-13T07-45-34-057Z/`, including
+`smoke.json`, `candidate-deploy.json`, `rollback.json`, `restored-candidate.json`
+and `startup-logs.json`. Each deployment also retains its own operation report.
+The initial probe setup received a Gateway `404` because its HTTP client did not
+send the required Host header; the corrected probe started its measurements
+after fixture creation succeeded.
+
+The repository was moved to `/Users/dentuzhik/shortlink` during this increment.
+`origin` now points to `https://github.com/dentuzhik/shortlink`; no CI configuration
+was introduced. The local Gateway bridge's bind mount was refreshed to the new
+`deploy/kind/haproxy.cfg` path, and the UI and API passed checks afterward.
 
 ## Test a Fastify rolling restart
 
