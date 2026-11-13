@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -142,8 +143,9 @@ async function load(image, expectedDigest) {
     "inspecti",
     image,
   ]);
-  if (!info) {
-    // Rollbacks reuse the retained artifact; they never rebuild an old tag.
+  if (!info || !expectedDigest) {
+    // Docker's image ID may identify a multi-platform index. CRI's ID identifies
+    // the platform configuration; hash that exact configuration for comparison.
     await output("docker", ["image", "inspect", image]);
     const architecture = (
       await kube(
@@ -166,34 +168,41 @@ async function load(image, expectedDigest) {
         archive,
         image,
       ]);
-      await run("kind", [
-        "load",
-        "image-archive",
-        "--name",
-        "shortlink",
-        archive,
-      ]);
+      const [manifest] = JSON.parse(
+        await output("tar", ["-xOf", archive, "manifest.json"]),
+      );
+      const config = (
+        await execute("tar", ["-xOf", archive, manifest.Config], {
+          encoding: "buffer",
+          maxBuffer: 8 * 1024 * 1024,
+        })
+      ).stdout;
+      const configDigest = `sha256:${createHash("sha256").update(config).digest("hex")}`;
+      if (!info) {
+        await run("kind", [
+          "load",
+          "image-archive",
+          "--name",
+          "shortlink",
+          archive,
+        ]);
+        info = JSON.parse(
+          await output("docker", [
+            "exec",
+            "shortlink-control-plane",
+            "crictl",
+            "inspecti",
+            image,
+          ]),
+        );
+      }
+      if (info.status.id !== configDigest)
+        throw new Error(
+          "kind's SHA tag contains different content from the built image; deployment was not changed",
+        );
     } finally {
       await rm(folder, { recursive: true, force: true });
     }
-    info = JSON.parse(
-      await output("docker", [
-        "exec",
-        "shortlink-control-plane",
-        "crictl",
-        "inspecti",
-        image,
-      ]),
-    );
-  }
-  if (!expectedDigest) {
-    const [built] = JSON.parse(
-      await output("docker", ["image", "inspect", image]),
-    );
-    if (built.Id !== info.status.id)
-      throw new Error(
-        "kind's SHA tag contains different content from the built image; deployment was not changed",
-      );
   }
   const digest = imageDigest(info.status.repoDigests[0]);
   if (expectedDigest && digest !== expectedDigest)
