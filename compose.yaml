@@ -75,6 +75,8 @@ services:
     build:
       context: .
       target: web
+    environment:
+      SHORT_LINK_ORIGIN: http://127.0.0.1:3100
     ports:
       - "127.0.0.1:3101:3001"
     depends_on:

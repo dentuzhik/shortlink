@@ -1,6 +1,11 @@
+import { connection } from "next/server";
+import { shortLinkOrigin } from "../lib/runtime-config";
 import { LinkCreator } from "./link-creator";
 
-export default function Page() {
+export default async function Page() {
+  // Keep deployment configuration out of the build-time prerender.
+  await connection();
+  const origin = shortLinkOrigin();
   return (
     <div className="shell">
       <header className="topbar">
@@ -22,7 +27,7 @@ export default function Page() {
             Turn a destination URL into a short link you can copy and share.
           </p>
         </div>
-        <LinkCreator />
+        <LinkCreator shortLinkOrigin={origin} />
       </main>
     </div>
   );

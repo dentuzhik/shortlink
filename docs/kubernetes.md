@@ -131,9 +131,13 @@ The [routing manifest](../deploy/k8s/gateway.yaml) separates three concepts:
 
 GraphQL stays on the UI's origin: the browser calls `app.localhost:8080/graphql`,
 and Next.js forwards to `http://redirect-service:3000/graphql` internally.
-The UI's generated short-link origin is compiled by Next.js, so `k8s:up` supplies
-`NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080` as a Docker build argument.
-Setting this variable only on a running web pod would not change its browser bundle.
+The web Deployment supplies `SHORT_LINK_ORIGIN=http://go.localhost:8080` at
+runtime. The server reads it during request-time rendering and passes the public
+origin into the form. The same UI image can therefore generate links for another
+public hostname when its pod environment changes. The GraphQL rewrite retains
+the stable internal Service name `redirect-service:3000` in the built image.
+Use `pnpm k8s:deploy:web <commit>` to deploy a published UI image after bootstrap;
+see [delivery and rollback](delivery.md).
 
 The first run downloads the pinned Gateway API v1.6.3 standard CRDs into `.kind/`.
 The CRDs define the Kubernetes resource types; the running controller makes those

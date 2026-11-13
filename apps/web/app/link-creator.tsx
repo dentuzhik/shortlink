@@ -2,9 +2,6 @@
 
 import { type FormEvent, useState } from "react";
 
-const shortLinkOrigin =
-  process.env.NEXT_PUBLIC_SHORT_LINK_ORIGIN ?? "http://127.0.0.1:3000";
-
 const createLinkMutation = /* GraphQL */ `
   mutation CreateLink($input: CreateLinkInput!) {
     createLink(input: $input) {
@@ -20,7 +17,7 @@ type MutationResponse = {
   errors?: { message: string }[];
 };
 
-export function LinkCreator() {
+export function LinkCreator({ shortLinkOrigin }: { shortLinkOrigin: string }) {
   const [targetUrl, setTargetUrl] = useState("");
   const [result, setResult] = useState<Link | null>(null);
   const [error, setError] = useState("");

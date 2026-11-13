@@ -43,11 +43,16 @@ repository. After the first push, set each package's Settings → Change visibil
 to Public. Later versions inherit the package visibility. Public images require
 no local registry credential or Kubernetes pull secret.
 
-The published web image currently compiles
-`NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080`, matching our local
-Gateway. Its GraphQL rewrite targets the internal `redirect-service:3000` Service.
-Another public hostname requires a new web build; runtime environment variables
-do not rewrite a Next.js browser bundle.
+The web image reads `SHORT_LINK_ORIGIN` when its server renders a page, then
+passes that single public URL into the client form. Kubernetes sets it to
+`http://go.localhost:8080`; Compose sets it to `http://127.0.0.1:3100`. CI starts
+the same built image with two different origins to verify runtime portability.
+No `NEXT_PUBLIC_*` hostname is compiled into the browser bundle.
+
+The GraphQL rewrite still targets `http://redirect-service:3000`, compiled during
+the build. Environments reusing this image must retain that internal Service name
+and port. Changing public DNS alone does not require changing that internal name.
+A different internal topology would need a new build or a runtime proxy design.
 
 CI publishes artifacts; deployment remains an explicit local command. A commit
 tag is a source convention, not an immutable registry policy: a rerun can replace
@@ -88,6 +93,36 @@ pnpm k8s:rollback                # restore the previous retained revision
 pnpm k8s:rollback 20             # example: choose a revision from history
 ```
 
+The UI has independent release commands:
+
+```sh
+pnpm k8s:deploy:web <git-commit>   # pull/pin the published UI image
+pnpm k8s:version:web              # web rollout history, readiness and digest
+pnpm k8s:rollback:web             # restore the previous retained web template
+pnpm k8s:rollback:web 12          # example: choose a web revision from its history
+```
+
+Deploy a matching API/UI pair by passing the same published commit to
+`k8s:deploy` and `k8s:deploy:web`. Their Kubernetes revision counters are separate.
+These commands are independent operations, so an API/UI rollout is not atomic;
+old and new versions must remain compatible while replacements are in progress.
+A failure is recorded and exits nonzero; neither component automatically rolls
+back the other. The initial `:local` web template lacks versioned metadata, so
+establish a published baseline before exercising its rollback.
+
+The web command preserves its configured literal `SHORT_LINK_ORIGIN`, or defaults
+to the local Gateway origin if none is set. Override it explicitly with:
+
+```sh
+SHORT_LINK_ORIGIN=https://links.example.com pnpm k8s:deploy:web <git-commit>
+```
+
+This rolls the web pods without rebuilding the image. The hostname must also have
+working DNS, Gateway routing and TLS in the destination environment; the variable
+only controls generated links. Rollback restores the entire previous pod template,
+including its hostname value. Web verification checks the ready pods' actual
+digests and baked `APP_REVISION`; Fastify also reports its running build-info metric.
+
 `k8s:deploy` resolves the commit tag to its registry index digest, selects the
 kind node's platform digest, pulls and checks that image's platform and baked
 revision, then patches the Deployment to `repository:<sha>@sha256:<digest>` with
@@ -105,8 +140,9 @@ pnpm k8s:deploy:local <commit>    # build an archived committed snapshot
 
 These local commands use `git archive`, require a clean tree for implicit HEAD,
 and retain the `Never` pull policy. Existing local SHA tags are checked and
-reused rather than overwritten. Both paths target only context `kind-shortlink`,
-namespace `shortlink`, Deployment `redirect-service`, container `api`.
+reused rather than overwritten. All release commands target only context `kind-shortlink`, namespace `shortlink`.
+API commands select Deployment `redirect-service` / container `api`; UI commands
+select Deployment `web` / container `web`.
 
 A **Git SHA identifies source**. A **Kubernetes revision identifies a pod-template
 rollout**; a restart can create another rollout of the same Git version. Deploy

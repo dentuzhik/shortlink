@@ -30,7 +30,10 @@ The redirect itself still goes to Fastify.
 
 The web app defaults to `http://127.0.0.1:3000` for both the Fastify upstream
 and generated short links. Override them separately with `REDIRECT_SERVICE_ORIGIN`
-and `NEXT_PUBLIC_SHORT_LINK_ORIGIN` before starting or building the web app.
+and `SHORT_LINK_ORIGIN`. The public origin is read at request time by the server
+page and passed into the form. In production builds, the GraphQL upstream in the
+rewrite is fixed during `next build`; public-origin changes only require restarting
+the web process with the new environment value.
 
 With `pnpm dev` running after `pnpm db:migrate`:
 

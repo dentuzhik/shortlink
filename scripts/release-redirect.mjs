@@ -5,14 +5,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import {
-  platformDigest,
-  redirectRepository,
-  verifyImageMetadata,
-} from "./lib/published-image.mjs";
+import { shortLinkOrigin } from "../apps/web/lib/runtime-config.ts";
+import { platformDigest, verifyImageMetadata } from "./lib/published-image.mjs";
 import {
   imageDigest,
   imageRevision,
+  releaseTarget,
   reportedRevision,
   rollbackTarget,
   servingPods,
@@ -33,13 +31,21 @@ const output = async (command, args) =>
 const kube = (...args) => output("kubectl", [...kubeArgs, ...args]);
 const kubeJson = async (...args) =>
   JSON.parse(await kube(...args, "-o", "json"));
-const [action, argument, ...extra] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const target = args[0] === "web" ? args.shift() : "redirect";
+const profile = releaseTarget(target);
+const [action, argument, ...extra] = args;
 if (
   !["build", "deploy", "deploy-local", "rollback", "status"].includes(action) ||
   extra.length
 )
   throw new Error(
-    "Usage: release-redirect.mjs build|deploy|deploy-local [git-commit] | rollback [kubernetes-revision] | status",
+    "Usage: release-redirect.mjs [web] build|deploy|deploy-local [git-commit] | rollback [kubernetes-revision] | status",
+  );
+
+if (target === "web" && ["build", "deploy-local"].includes(action))
+  throw new Error(
+    "UI releases use published images; use k8s:up for local development builds",
   );
 
 async function run(command, args, inputFile) {
@@ -100,7 +106,7 @@ async function published(ref) {
   const revision = (
     await output("git", ["rev-parse", "--verify", `${ref ?? "HEAD"}^{commit}`])
   ).trim();
-  const tag = `${redirectRepository}:${revision}`;
+  const tag = `${profile.repository}:${revision}`;
   const indexDigest = imageDigest(
     (
       await output("docker", [
@@ -118,13 +124,13 @@ async function published(ref) {
       "buildx",
       "imagetools",
       "inspect",
-      `${redirectRepository}@${indexDigest}`,
+      `${profile.repository}@${indexDigest}`,
       "--raw",
     ]),
   );
   const digest = platformDigest(index, await nodeArchitecture());
   const release = { image: `${tag}@${digest}`, revision, digest, indexDigest };
-  imageRevision(release.image);
+  imageRevision(release.image, target);
   await pullPublished(release);
   return release;
 }
@@ -293,16 +299,29 @@ async function verify(release) {
     ...kubeArgs,
     "rollout",
     "status",
-    "deployment/redirect-service",
+    `deployment/${profile.deployment}`,
     "--timeout=120s",
   ]);
-  const deployment = await kubeJson("get", "deployment", "redirect-service");
-  const pods = (await kubeJson("get", "pods", "-l", "app=redirect-service"))
-    .items;
-  const serving = servingPods(pods, release, deployment.spec.replicas);
+  const deployment = await kubeJson("get", "deployment", profile.deployment);
+  const pods = (
+    await kubeJson("get", "pods", "-l", `app=${profile.deployment}`)
+  ).items;
+  const serving = servingPods(pods, release, deployment.spec.replicas, target);
   const results = [];
   for (const pod of serving) {
-    const revision = reportedRevision(await readMetrics(pod.metadata.name));
+    const revision =
+      target === "redirect"
+        ? reportedRevision(await readMetrics(pod.metadata.name))
+        : (
+            await kube(
+              "exec",
+              pod.metadata.name,
+              "--",
+              "node",
+              "-p",
+              "process.env.APP_REVISION",
+            )
+          ).trim();
     if (revision !== release.revision)
       throw new Error(
         `Pod ${pod.metadata.name} reports unexpected revision ${revision}`,
@@ -310,8 +329,9 @@ async function verify(release) {
     results.push({
       pod: pod.metadata.name,
       image: release.image,
-      imageID: pod.status.containerStatuses.find((item) => item.name === "api")
-        .imageID,
+      imageID: pod.status.containerStatuses.find(
+        (item) => item.name === profile.container,
+      ).imageID,
       revision,
     });
   }
@@ -327,19 +347,21 @@ async function verify(release) {
 }
 
 if (action === "status") {
-  console.log(await kube("rollout", "history", "deployment/redirect-service"));
-  const deployment = await kubeJson("get", "deployment", "redirect-service");
+  console.log(
+    await kube("rollout", "history", `deployment/${profile.deployment}`),
+  );
+  const deployment = await kubeJson("get", "deployment", profile.deployment);
   console.log(
     "Git SHA identifies source; Kubernetes revision identifies a pod-template rollout.",
   );
-  await verify(templateRelease(deployment.spec.template));
+  await verify(templateRelease(deployment.spec.template, target));
 } else {
   const directory = resolve(
     ".kind/releases",
-    `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${action}`,
+    `${new Date().toISOString().replaceAll(/[:.]/g, "-")}-${target}-${action}`,
   );
   await mkdir(directory, { recursive: true });
-  const report = { action, argument, directory, startedAt: Date.now() };
+  const report = { target, action, argument, directory, startedAt: Date.now() };
   try {
     if (action === "build") {
       report.release = await build(argument);
@@ -347,11 +369,11 @@ if (action === "status") {
       const deployment = await kubeJson(
         "get",
         "deployment",
-        "redirect-service",
+        profile.deployment,
       );
       report.before = {
         image: deployment.spec.template.spec.containers.find(
-          (item) => item.name === "api",
+          (item) => item.name === profile.container,
         ).image,
         kubernetesRevision:
           deployment.metadata.annotations["deployment.kubernetes.io/revision"],
@@ -364,16 +386,35 @@ if (action === "status") {
           report.release.digest = await load(report.release.image);
         }
         const { image, revision, digest } = report.release;
+        const container = {
+          name: profile.container,
+          image,
+          imagePullPolicy: action === "deploy" ? "IfNotPresent" : "Never",
+        };
+        if (target === "web") {
+          const previous = deployment.spec.template.spec.containers
+            .find((item) => item.name === "web")
+            ?.env?.find((item) => item.name === "SHORT_LINK_ORIGIN");
+          // Preserve an existing literal hostname unless the caller supplies one.
+          const origin = shortLinkOrigin(
+            process.env.SHORT_LINK_ORIGIN ??
+              previous?.value ??
+              "http://go.localhost:8080",
+          );
+          container.env = [
+            { name: "SHORT_LINK_ORIGIN", value: origin, valueFrom: null },
+          ];
+        }
         await kube(
           "patch",
           "deployment",
-          "redirect-service",
+          profile.deployment,
           "--type=strategic",
           "--patch",
           JSON.stringify({
             metadata: {
               annotations: {
-                "kubernetes.io/change-cause": `Fastify ${revision}`,
+                "kubernetes.io/change-cause": `${target} ${revision}`,
               },
             },
             spec: {
@@ -387,14 +428,7 @@ if (action === "status") {
                   },
                 },
                 spec: {
-                  containers: [
-                    {
-                      name: "api",
-                      image,
-                      imagePullPolicy:
-                        action === "deploy" ? "IfNotPresent" : "Never",
-                    },
-                  ],
+                  containers: [container],
                 },
               },
             },
@@ -402,9 +436,14 @@ if (action === "status") {
         );
       } else {
         const sets = (
-          await kubeJson("get", "replicasets", "-l", "app=redirect-service")
+          await kubeJson(
+            "get",
+            "replicasets",
+            "-l",
+            `app=${profile.deployment}`,
+          )
         ).items;
-        report.release = rollbackTarget(deployment, sets, argument);
+        report.release = rollbackTarget(deployment, sets, argument, target);
         if (report.release.image.startsWith("ghcr.io/")) {
           await pullPublished(report.release);
         } else {
@@ -413,20 +452,20 @@ if (action === "status") {
         await kube(
           "rollout",
           "undo",
-          "deployment/redirect-service",
+          `deployment/${profile.deployment}`,
           `--to-revision=${report.release.kubernetesRevision}`,
         );
         await kube(
           "annotate",
           "deployment",
-          "redirect-service",
-          `kubernetes.io/change-cause=Rollback to Fastify ${report.release.revision}`,
+          profile.deployment,
+          `kubernetes.io/change-cause=Rollback ${target} to ${report.release.revision}`,
           "--overwrite",
         );
       }
       report.pods = await verify(report.release);
       report.afterKubernetesRevision = (
-        await kubeJson("get", "deployment", "redirect-service")
+        await kubeJson("get", "deployment", profile.deployment)
       ).metadata.annotations["deployment.kubernetes.io/revision"];
     }
     report.passed = true;

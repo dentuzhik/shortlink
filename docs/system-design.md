@@ -173,7 +173,10 @@ allocation were introduced and the scope in which they passed.
 
 CI builds tested commits into GHCR images for AMD64 and ARM64, with a full
 commit-SHA tag and baked revision. Registry deployments select and pin the node
-platform digest. An explicit local build path uses `git archive` for an exact
+platform digest. API and UI have independent deployment and rollback commands;
+their rollout histories are separate. The UI receives its public short-link
+origin at runtime, allowing the same artifact to serve different public hostnames.
+An explicit local build path uses `git archive` for an exact
 committed snapshot. The deployment workflow records
 and checks image digests as well as each pod's own build-info metric. Rollback
 restores a retained pod template and verifies the previous artifact in every

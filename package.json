@@ -37,6 +37,9 @@
     "k8s:deploy:local": "node scripts/release-redirect.mjs deploy-local",
     "k8s:rollback": "node scripts/release-redirect.mjs rollback",
     "k8s:version": "node scripts/release-redirect.mjs status",
+    "k8s:deploy:web": "node scripts/release-redirect.mjs web deploy",
+    "k8s:rollback:web": "node scripts/release-redirect.mjs web rollback",
+    "k8s:version:web": "node scripts/release-redirect.mjs web status",
     "test:release": "node --test scripts/test/*.test.mjs"
   },
   "devDependencies": {

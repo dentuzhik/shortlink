@@ -1,10 +1,22 @@
-export function imageRevision(image) {
-  const match =
-    /^(?:shortlink-redirect|ghcr\.io\/dentuzhik\/shortlink-redirect):([a-f0-9]{40})(?:@(sha256:[a-f0-9]{64}))?$/.exec(
-      image,
-    );
+export function releaseTarget(target = "redirect") {
+  if (!["redirect", "web"].includes(target))
+    throw new Error(`Unknown release target: ${target}`);
+  return {
+    target,
+    deployment: target === "redirect" ? "redirect-service" : "web",
+    container: target === "redirect" ? "api" : "web",
+    imageName: `shortlink-${target}`,
+    repository: `ghcr.io/dentuzhik/shortlink-${target}`,
+  };
+}
+
+export function imageRevision(image, target = "redirect") {
+  const profile = releaseTarget(target);
+  const match = new RegExp(
+    `^(?:${profile.imageName}|${profile.repository.replaceAll(".", "\\.")}):([a-f0-9]{40})(?:@(sha256:[a-f0-9]{64}))?$`,
+  ).exec(image);
   if (!match)
-    throw new Error(`Expected a commit-tagged Fastify image, got ${image}`);
+    throw new Error(`Expected a commit-tagged ${target} image, got ${image}`);
   if (image.startsWith("ghcr.io/") && !match[2])
     throw new Error("Published releases must pin a registry digest");
   return match[1];
@@ -16,11 +28,12 @@ export function imageDigest(value) {
   return match[1];
 }
 
-export function templateRelease(template) {
+export function templateRelease(template, target = "redirect") {
+  const { container: containerName } = releaseTarget(target);
   const image = template.spec.containers.find(
-    (container) => container.name === "api",
+    (container) => container.name === containerName,
   )?.image;
-  const revision = imageRevision(image);
+  const revision = imageRevision(image, target);
   const annotations = template.metadata.annotations ?? {};
   if (annotations["shortlink.dev/git-revision"] !== revision)
     throw new Error("Pod template revision does not match its image tag");
@@ -30,7 +43,12 @@ export function templateRelease(template) {
   return { image, revision, digest };
 }
 
-export function rollbackTarget(deployment, replicaSets, requested) {
+export function rollbackTarget(
+  deployment,
+  replicaSets,
+  requested,
+  target = "redirect",
+) {
   const current = Number(
     deployment.metadata.annotations["deployment.kubernetes.io/revision"],
   );
@@ -62,20 +80,23 @@ export function rollbackTarget(deployment, replicaSets, requested) {
     );
   return {
     kubernetesRevision: selected.number,
-    ...templateRelease(selected.set.spec.template),
+    ...templateRelease(selected.set.spec.template, target),
   };
 }
 
-export function servingPods(pods, release, replicas) {
+export function servingPods(pods, release, replicas, target = "redirect") {
+  const { container: containerName } = releaseTarget(target);
   const serving = pods.filter((pod) => !pod.metadata.deletionTimestamp);
   if (serving.length !== replicas)
     throw new Error(
       `Expected ${replicas} serving pods; found ${serving.length}`,
     );
   for (const pod of serving) {
-    const container = pod.spec.containers.find((item) => item.name === "api");
+    const container = pod.spec.containers.find(
+      (item) => item.name === containerName,
+    );
     const status = pod.status.containerStatuses?.find(
-      (item) => item.name === "api",
+      (item) => item.name === containerName,
     );
     const ready = pod.status.conditions?.some(
       (condition) => condition.type === "Ready" && condition.status === "True",

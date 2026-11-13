@@ -11,8 +11,7 @@ kube() {
 }
 
 docker compose build redirect-service
-# NEXT_PUBLIC_* values are compiled into the browser bundle by Next.js.
-docker compose build --build-arg NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080 web
+docker compose build web
 docker image inspect postgres:18.6 >/dev/null 2>&1 || docker pull postgres:18.6
 docker image inspect redis:8.10.3-alpine >/dev/null 2>&1 || docker pull redis:8.10.3-alpine
 clusters=$(kind get clusters)

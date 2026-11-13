@@ -144,3 +144,29 @@ test("registry releases require a digest matching the pod template", () => {
     /must pin/,
   );
 });
+
+test("web verification selects the web container and rejects an API image in its template", () => {
+  const webRelease = {
+    image: `ghcr.io/dentuzhik/shortlink-web:${revision}@${digest}`,
+    revision,
+    digest,
+  };
+  const webTemplate = structuredClone(template);
+  webTemplate.spec.containers = [{ name: "web", image: webRelease.image }];
+  assert.deepEqual(templateRelease(webTemplate, "web"), webRelease);
+  assert.throws(() => templateRelease(template, "web"), /commit-tagged web/);
+  const webPod = pod();
+  webPod.spec = webTemplate.spec;
+  webPod.status.containerStatuses[0].name = "web";
+  assert.equal(servingPods([webPod], webRelease, 1, "web").length, 1);
+  const previous = set(7);
+  previous.spec.template = webTemplate;
+  assert.equal(
+    rollbackTarget(deployment, [previous], undefined, "web").image,
+    webRelease.image,
+  );
+  assert.throws(
+    () => imageRevision(webRelease.image),
+    /commit-tagged redirect/,
+  );
+});

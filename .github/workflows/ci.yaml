@@ -116,7 +116,6 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}:${{ env.PLATFORM_TAG }}
           build-args: |
             APP_REVISION=${{ env.REVISION }}
-            NEXT_PUBLIC_SHORT_LINK_ORIGIN=http://go.localhost:8080
           labels: |
             org.opencontainers.image.revision=${{ env.REVISION }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -136,6 +135,9 @@ jobs:
           docker run --rm --entrypoint node "$IMAGE_NAME:$PLATFORM_TAG" \
             -e 'if (process.env.APP_REVISION !== process.argv[1]) throw new Error("Image revision mismatch")' \
             "$REVISION"
+      - name: Verify one web image with two runtime hostnames
+        if: matrix.target == 'web'
+        run: node scripts/verify-web-image.mjs "$IMAGE_NAME:$PLATFORM_TAG"
       - name: Record the verified platform artifact and its provenance index
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
