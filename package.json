@@ -26,6 +26,7 @@
     "test:web-rollout": "node scripts/test-web-rollout.mjs",
     "test:integration": "sh scripts/test-integration.sh",
     "test:db-restore": "pnpm --filter @url-shortener/redirect-service... build && node scripts/rehearse-db-restore.mjs",
+    "test:db-switchover": "node scripts/test-db-switchover.mjs",
     "test:rolling-restart": "node scripts/test-rolling-restart.mjs",
     "typecheck": "pnpm -r run typecheck",
     "lint": "biome check .",

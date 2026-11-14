@@ -113,7 +113,8 @@ using the primary initially. The verifier separately waits for both standbys to
 replay a captured WAL position and find the inserted probe row.
 
 If neither standby can confirm a commit, this policy can block writes. The lab
-has not yet demonstrated that failure case or qualified automatic promotion.
+has not yet demonstrated the no-standby failure case or qualified automatic
+promotion after an unexpected failure.
 CloudNativePG's separate `failoverQuorum` option remains at its observed default
 `false`. Synchronous acknowledgment is not, by itself, a proof of safe promotion
 under every partition or a blanket zero-data-loss guarantee.
@@ -171,6 +172,74 @@ No database backups, WAL archive, source replication stream, Grafana integration
 or off-host durability policy is configured for this disposable tier yet. The
 original source backup remains on the Mac. Do not use this lab as the sole home
 of real links before those migration and recovery checkpoints pass.
+
+## Planned primary switchover
+
+```sh
+pnpm test:db-switchover
+```
+
+Run this only against the disposable lab, with no concurrent database maintenance.
+It selects a healthy standby and asks the pinned CloudNativePG CLI to promote it.
+The new primary remains primary afterward; the test does not automatically switch
+back. It never stops workers or changes replication/shutdown settings.
+
+The [coordinator](../scripts/test-db-switchover.mjs) creates one temporary Pod and
+ConfigMap, using an existing digest-pinned API image only as a Node/pg runtime.
+The application server and its image entrypoint are not started. The Pod has a
+128 MiB memory limit, no Kubernetes API token, a read-only filesystem, generated
+application-role credentials via Secret references, and only the public CA
+certificate mounted from the CA Secret. It connects with verified TLS to
+`shortlink-lab-rw.database-lab.svc` through the actual Service network.
+
+Do not replace this with a `port-forward service/...` when measuring endpoint
+handoff: that tunnel selects a pod and does not follow later primary changes.
+
+The [probe](../scripts/db-lab-probe.cjs) retains separate writer and reader
+connections. Each loop performs one operation, then waits until roughly 100 ms
+has elapsed before its next attempt. It runs for 60 seconds, with at least ten
+seconds of error-free baseline before promotion. This is closed-loop pacing,
+up to about ten writes and ten reads per second, not a fixed-arrival-rate or
+throughput-ceiling benchmark. Connect and query waits are bounded; stalled
+operations reduce how many attempts start.
+
+A failed connection is replaced on the next attempt. No INSERT is automatically
+retried. Each write has a unique token, and its outcome is classified as:
+
+- **Acknowledged:** PostgreSQL returned a successful INSERT response.
+- **Not sent:** connection establishment failed before the INSERT was attempted.
+- **Ambiguous:** the query was attempted but no successful response was received.
+  After recovery, look up that token to determine whether it committed.
+
+The reader also checks that its connection is on a primary; it must not quietly
+continue reading the former primary after it becomes a standby. These behaviors
+belong to the test client. They do not add public-API creation idempotency or
+change Fastify's existing database error handling.
+
+The coordinator records roles, Cluster status, primary-Service EndpointSlices,
+source API/UI smoke checks and host memory pressure. EndpointSlices can be empty
+during the transition. Records are sampled observations, not atomic snapshots
+of all servers. Durations between successful client operations use the probe's
+own monotonic clock and include normal pacing. They are not exact measurements
+of the period when PostgreSQL itself had no primary.
+
+The acceptance criterion is a data-preserving, recoverable planned handoff:
+all acknowledged writes remain on the new primary, unknown outcomes are
+accounted for, the former primary returns as a standby, Service routing reaches
+the new primary, and both client loops resume successful operations. Sampled
+source health must remain good and host pressure normal. **Connection failures
+are measured, not forbidden by this test. A passing result is not a zero-error
+availability SLO.** Read the [recorded trial](experiments/database-switchover.md)
+for the observed interruption and the [recovery-gap investigation](experiments/database-switchover-recovery.md)
+for its timing breakdown.
+
+Evidence is retained privately in `.kind/db-cluster/switchovers/<timestamp>/`:
+`probe.ndjson`, `timeline.json` and `result.json`. The temporary Pod and ConfigMap
+are deleted using their run-specific label. Test rows are retained in the lab;
+credentials and Secret contents are not exported. If interrupted, inspect the
+actual primary before doing anything else: a completed promotion is not undone
+by stopping the test. Preserve failed trials rather than tuning settings or
+silently switching back to make a result pass.
 
 ## References
 

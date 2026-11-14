@@ -9,5 +9,8 @@
   "operatorArm64Manifest": "sha256:9a10dd7d7466310d5d543f618478cb905093cfc7a5463b538f449da626660083",
   "postgresVersion": "18.7",
   "postgresImage": "ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie@sha256:5a5dfbde88d5909fd4938189c141f53fb153f53c519f14907dce9e7c04baa153",
-  "postgresArm64Manifest": "sha256:e342b11645e508586a863be18542872b735bdea637ebbb20785b775701df7b99"
+  "postgresArm64Manifest": "sha256:e342b11645e508586a863be18542872b735bdea637ebbb20785b775701df7b99",
+  "cnpgPluginUrl": "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.1/kubectl-cnpg_1.30.1_darwin_arm64.tar.gz",
+  "cnpgPluginSha256": "74836f530b54f060126fc8cf5fd5c27e77801a6d36f61b66f4457218aa11383f",
+  "switchoverProbeImage": "ghcr.io/dentuzhik/shortlink-redirect:befb121f76e20ce6ad63e6dac4ab3462e4fbdcc2@sha256:899ab3d685a0825abc4c88110a180957c4f469d4f7b10d90f85c8ea2db132803"
 }

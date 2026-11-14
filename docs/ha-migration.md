@@ -19,6 +19,12 @@ data and verified healthy synchronous replication. The user selected one require
 synchronous standby. Its [bootstrap report](experiments/cloudnativepg-bootstrap.md)
 records the failed six-GiB host gate and the approved four-GiB database profile;
 full overlap capacity, failover and real-data migration remain unverified.
+A [planned switchover trial](experiments/database-switchover.md) subsequently
+preserved all 517 acknowledged test writes and recovered client access, with
+multi-second connection interruptions. Unexpected failover and zero-error
+application migration remain unqualified. A [read-only recovery investigation](experiments/database-switchover-recovery.md)
+subsequently separated ownership handoff, Service publication and client/write
+recovery; no timing or durability settings were tuned.
 
 ## Purpose and goals
 

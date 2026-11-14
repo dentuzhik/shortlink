@@ -227,4 +227,6 @@ lists the decisions still required.
 
 The separate [CloudNativePG lab](database-ha-lab.md) now demonstrates healthy
 synchronous replication on disposable data. It has not migrated the live
-application or qualified database failover.
+application or qualified unexpected database failover. A
+[planned switchover](experiments/database-switchover.md) preserved acknowledged
+test data but interrupted client access.
