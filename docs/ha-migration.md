@@ -8,6 +8,10 @@ and unresolved decisions. It is not an executable runbook or evidence that HA
 or a zero-downtime migration already works. Update it as each increment is
 reviewed, and record measured results separately.
 
+The [initial capacity inventory](experiments/ha-capacity-planning.md) was
+completed on November 14, 2026. It proposes profile budgets and a first-phase
+worker-failure topology; no VM or cluster changes have been made.
+
 ## Purpose and goals
 
 Practice moving a running service and its existing data to new infrastructure
