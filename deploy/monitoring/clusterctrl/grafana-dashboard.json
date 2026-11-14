@@ -786,7 +786,7 @@
     },
     {
       "id": 11,
-      "title": "CPU and memory \u00b7 selected machines",
+      "title": "USB \u00b7 P1\u2013P4 packet errors and link health",
       "type": "row",
       "collapsed": false,
       "panels": [],
@@ -799,6 +799,945 @@
     },
     {
       "id": 12,
+      "title": "P1 \u00b7 USB link",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Controller-side ethpi1. Carrier present does not establish IP/SSH health. Absent means the network interface is not detected; a raw USB boot device may still exist. No telemetry means controller/netclass collection is unavailable. USB panels always cover all four ports, independently of the general machine/interface filters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO TELEMETRY",
+          "min": 0,
+          "max": 2,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INTERFACE ABSENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO CARRIER",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "CARRIER PRESENT",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO TELEMETRY",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi1\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P1",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 13,
+      "title": "P2 \u00b7 USB link",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 16,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Controller-side ethpi2. Carrier present does not establish IP/SSH health. Absent means the network interface is not detected; a raw USB boot device may still exist. No telemetry means controller/netclass collection is unavailable. USB panels always cover all four ports, independently of the general machine/interface filters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO TELEMETRY",
+          "min": 0,
+          "max": 2,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INTERFACE ABSENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO CARRIER",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "CARRIER PRESENT",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO TELEMETRY",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi2\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P2",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 14,
+      "title": "P3 \u00b7 USB link",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Controller-side ethpi3. Carrier present does not establish IP/SSH health. Absent means the network interface is not detected; a raw USB boot device may still exist. No telemetry means controller/netclass collection is unavailable. USB panels always cover all four ports, independently of the general machine/interface filters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO TELEMETRY",
+          "min": 0,
+          "max": 2,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INTERFACE ABSENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO CARRIER",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "CARRIER PRESENT",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO TELEMETRY",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi3\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P3",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 15,
+      "title": "P4 \u00b7 USB link",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 16,
+        "w": 6,
+        "h": 4
+      },
+      "description": "Controller-side ethpi4. Carrier present does not establish IP/SSH health. Absent means the network interface is not detected; a raw USB boot device may still exist. No telemetry means controller/netclass collection is unavailable. USB panels always cover all four ports, independently of the general machine/interface filters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "NO TELEMETRY",
+          "min": 0,
+          "max": 2,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INTERFACE ABSENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO CARRIER",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "CARRIER PRESENT",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO TELEMETRY",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi4\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P4",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        },
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 16,
+      "title": "USB packet error rate \u00b7 controller side",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Current error rate from controller ethpi1\u2013ethpi4. TX is controller \u2192 Pi; RX is Pi \u2192 controller. Driver error counters are not a packet-loss percentage. Missing counters remain gaps, not healthy zeros. USB enumeration errors before a network interface exists are not counted here.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:errors/s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(rate(node_network_transmit_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX errors",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(rate(node_network_receive_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX errors",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": ["lastNotNull"],
+          "width": 240
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "USB packet drop rate \u00b7 controller side",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 20,
+        "w": 12,
+        "h": 8
+      },
+      "description": "Driver-reported dropped packets, separate from errors. RX is received from the Pi; TX is transmitted toward it. Missing interfaces produce no samples.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix:drops/s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(rate(node_network_transmit_drop_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX drops",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(rate(node_network_receive_drop_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX drops",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": ["lastNotNull"],
+          "width": 240
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "USB errors \u00b7 cumulative counters",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Driver counters since interface creation/reset. Rising values indicate new failures; a flat nonzero value is historical. Counters can reset after device re-enumeration or reboot and can exceed successful packet counts.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(node_network_transmit_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}, \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX errors",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(node_network_receive_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}, \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX errors",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": ["lastNotNull", "max"],
+          "width": 240
+        }
+      }
+    },
+    {
+      "id": 19,
+      "title": "USB errors \u00b7 range increase (estimate)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Estimated error increments within the dashboard time range. Prometheus accounts for observed counter resets and extrapolates between scrapes, so values may be fractional. No samples means unknown, not zero.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "Unavailable",
+          "min": 0,
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(increase(node_network_transmit_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__range]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(increase(node_network_receive_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__range]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 20,
+      "title": "USB packets \u00b7 received / transmitted",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Controller-side packet throughput. Compare traffic with the error panels to identify stalls or an otherwise idle link. This is not an end-to-end reachability probe.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(rate(node_network_receive_packets_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(rate(node_network_transmit_packets_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": ["lastNotNull"],
+          "width": 240
+        }
+      }
+    },
+    {
+      "id": 21,
+      "title": "USB traffic \u00b7 received / transmitted",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 35,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Only the four USB interfaces are included; bridge and Ethernet traffic are excluded to avoid double counting.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(rate(node_network_receive_bytes_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} RX",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(rate(node_network_transmit_bytes_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__rate_interval]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} TX",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": ["lastNotNull"],
+          "width": 240
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "USB carrier transitions \u00b7 selected time range",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Observed carrier changes include startup/re-enumeration as well as cable/link changes. Estimates account for counter resets; a missing counter is unavailable.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "Unavailable"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "label_replace(increase(node_network_carrier_changes_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__range]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} changes",
+          "refId": "A",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        },
+        {
+          "expr": "label_replace(increase(node_network_carrier_down_changes_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}[$__range]), \"usb_node\", \"P$1\", \"device\", \"ethpi([1-4])\")",
+          "legendFormat": "{{usb_node}} lost carrier",
+          "refId": "B",
+          "instant": true,
+          "range": false,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": {
+          "calcs": ["last"],
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 23,
+      "title": "USB link history",
+      "type": "state-timeline",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "clusterctrl-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 7
+      },
+      "description": "Interface/carrier status collected on cbridge. Gaps mean controller/netclass telemetry is unavailable. A present carrier is separate from successful packet delivery or SSH.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          },
+          "noValue": "Unavailable",
+          "min": 0,
+          "max": 2,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "INTERFACE ABSENT",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "NO CARRIER",
+                  "color": "orange"
+                },
+                "2": {
+                  "text": "CARRIER PRESENT",
+                  "color": "green"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "NO TELEMETRY",
+                  "color": "gray"
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 0,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi1\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P1",
+          "refId": "A",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi2\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P2",
+          "refId": "B",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi3\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P3",
+          "refId": "C",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "expr": "((1 + max(node_network_carrier{job=\"nodes\",node=\"cbridge\",device=\"ethpi4\"})) and on() ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1))) or on() (0 * ((max(up{job=\"nodes\",node=\"cbridge\"}) == 1) and on() (max(node_scrape_collector_success{job=\"nodes\",node=\"cbridge\",collector=\"netclass\"}) == 1)))",
+          "legendFormat": "P4",
+          "refId": "D",
+          "instant": false,
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "rowHeight": 0.75,
+        "showValue": "auto",
+        "alignValue": "left",
+        "tooltip": {
+          "mode": "single"
+        },
+        "legend": {
+          "showLegend": false
+        }
+      }
+    },
+    {
+      "id": 24,
+      "title": "CPU and memory \u00b7 selected machines",
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "id": 25,
       "title": "CPU busy",
       "type": "timeseries",
       "datasource": {
@@ -807,7 +1746,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 50,
         "w": 12,
         "h": 8
       },
@@ -855,7 +1794,7 @@
       }
     },
     {
-      "id": 13,
+      "id": 26,
       "title": "RAM used \u00b7 excludes reclaimable cache",
       "type": "timeseries",
       "datasource": {
@@ -864,7 +1803,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 50,
         "w": 12,
         "h": 8
       },
@@ -912,7 +1851,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 27,
       "title": "Load average / CPU cores",
       "type": "timeseries",
       "datasource": {
@@ -921,7 +1860,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 58,
         "w": 12,
         "h": 7
       },
@@ -967,7 +1906,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 28,
       "title": "RAM and swap used",
       "type": "timeseries",
       "datasource": {
@@ -976,7 +1915,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 24,
+        "y": 58,
         "w": 12,
         "h": 7
       },
@@ -1030,20 +1969,20 @@
       }
     },
     {
-      "id": 16,
+      "id": 29,
       "title": "Storage \u00b7 SD-card capacity and I/O",
       "type": "row",
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 31,
+        "y": 65,
         "w": 24,
         "h": 1
       }
     },
     {
-      "id": 17,
+      "id": 30,
       "title": "Root filesystem used",
       "type": "timeseries",
       "datasource": {
@@ -1052,7 +1991,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 66,
         "w": 12,
         "h": 7
       },
@@ -1100,7 +2039,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 31,
       "title": "Disk read / write throughput",
       "type": "timeseries",
       "datasource": {
@@ -1109,7 +2048,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 66,
         "w": 12,
         "h": 7
       },
@@ -1163,7 +2102,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 32,
       "title": "Disk time busy",
       "type": "timeseries",
       "datasource": {
@@ -1172,7 +2111,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 39,
+        "y": 73,
         "w": 12,
         "h": 7
       },
@@ -1220,7 +2159,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 33,
       "title": "Free filesystem capacity",
       "type": "timeseries",
       "datasource": {
@@ -1229,7 +2168,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 39,
+        "y": 73,
         "w": 12,
         "h": 7
       },
@@ -1275,20 +2214,20 @@
       }
     },
     {
-      "id": 21,
+      "id": 34,
       "title": "Networking \u00b7 interface traffic and errors",
       "type": "row",
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 46,
+        "y": 80,
         "w": 24,
         "h": 1
       }
     },
     {
-      "id": 22,
+      "id": 35,
       "title": "Network received / transmitted",
       "type": "timeseries",
       "datasource": {
@@ -1297,7 +2236,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 81,
         "w": 12,
         "h": 8
       },
@@ -1351,7 +2290,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 36,
       "title": "Network error and drop rates",
       "type": "timeseries",
       "datasource": {
@@ -1360,7 +2299,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 47,
+        "y": 81,
         "w": 12,
         "h": 8
       },
@@ -1422,62 +2361,7 @@
       }
     },
     {
-      "id": 24,
-      "title": "Controller USB transmit errors \u00b7 cumulative since boot",
-      "type": "timeseries",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "clusterctrl-prometheus"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 55,
-        "w": 12,
-        "h": 7
-      },
-      "description": "A rising counter exposes recurring USB stalls even when brief connectivity checks pass.",
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "noValue": "Unavailable",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "spanNulls": false,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "expr": "node_network_transmit_errs_total{job=\"nodes\",node=\"cbridge\",device=~\"ethpi[1-4]\"}",
-          "legendFormat": "{{device}}",
-          "refId": "A",
-          "instant": false,
-          "range": true,
-          "format": "time_series"
-        }
-      ],
-      "options": {
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        },
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": ["lastNotNull", "max"]
-        }
-      }
-    },
-    {
-      "id": 25,
+      "id": 37,
       "title": "HAT node power \u00b7 power does not imply reachability",
       "type": "timeseries",
       "datasource": {
@@ -1485,9 +2369,9 @@
         "uid": "clusterctrl-prometheus"
       },
       "gridPos": {
-        "x": 12,
-        "y": 55,
-        "w": 12,
+        "x": 0,
+        "y": 89,
+        "w": 24,
         "h": 7
       },
       "description": "",
@@ -1532,20 +2416,20 @@
       }
     },
     {
-      "id": 26,
+      "id": 38,
       "title": "Thermal health and availability",
       "type": "row",
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "x": 0,
-        "y": 62,
+        "y": 96,
         "w": 24,
         "h": 1
       }
     },
     {
-      "id": 27,
+      "id": 39,
       "title": "Processor temperatures",
       "type": "timeseries",
       "datasource": {
@@ -1554,7 +2438,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 63,
+        "y": 97,
         "w": 12,
         "h": 7
       },
@@ -1600,7 +2484,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 40,
       "title": "Undervoltage / throttling flags",
       "type": "timeseries",
       "datasource": {
@@ -1609,7 +2493,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 63,
+        "y": 97,
         "w": 12,
         "h": 7
       },
@@ -1673,7 +2557,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 41,
       "title": "Node availability history",
       "type": "timeseries",
       "datasource": {
@@ -1682,7 +2566,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 70,
+        "y": 104,
         "w": 12,
         "h": 6
       },
@@ -1728,7 +2612,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 42,
       "title": "Uptime",
       "type": "timeseries",
       "datasource": {
@@ -1737,7 +2621,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 70,
+        "y": 104,
         "w": 12,
         "h": 6
       },
@@ -1783,7 +2667,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 43,
       "title": "Fan sensor availability",
       "type": "timeseries",
       "datasource": {
@@ -1792,7 +2676,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 76,
+        "y": 110,
         "w": 12,
         "h": 6
       },
@@ -1838,7 +2722,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 44,
       "title": "Exporter collection time",
       "type": "timeseries",
       "datasource": {
@@ -1847,7 +2731,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 76,
+        "y": 110,
         "w": 12,
         "h": 6
       },

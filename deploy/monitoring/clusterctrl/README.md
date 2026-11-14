@@ -18,6 +18,9 @@ If the password is changed in Grafana, the bootstrap file is not updated.
 - CPU busy/load, available RAM, swap usage and uptime.
 - SD-card space, reads/writes and time busy.
 - Per-interface RX/TX traffic, errors and drops, plus cumulative USB TX errors.
+- A dedicated USB section for P1–P4: interface/carrier status, RX/TX error and
+  drop rates, cumulative errors, error increases over the selected time range,
+  packet/byte throughput, carrier transitions and link-status history.
 - CPU temperatures and current/historical undervoltage and throttling flags.
 - Actual fan PWM duty over time, with hottest and smoothed temperatures.
 - An XY plot of live temperature/duty breakpoints from `/etc/clusterhat-fan.json`.
@@ -27,6 +30,37 @@ Fan output is commanded PWM duty, not RPM: this fan has no measured tachometer
 feed. Startup, hysteresis, smoothing and ramp-down can make the historical duty
 differ from the steady-state breakpoints. Fan metrics are read-only; these files
 do not modify fan policy. Unavailable sensor readings are omitted, never zeroed.
+
+### Reading the USB panels
+
+USB panels always cover all four controller interfaces independently of the
+general machine/interface filters. They work for both RNDIS and NCM images and
+remain useful when a node's exporter or SSH stops responding:
+
+| Interface | Pi  | RX direction    | TX direction    |
+| --------- | --- | --------------- | --------------- |
+| `ethpi1`  | P1  | P1 → controller | Controller → P1 |
+| `ethpi2`  | P2  | P2 → controller | Controller → P2 |
+| `ethpi3`  | P3  | P3 → controller | Controller → P3 |
+| `ethpi4`  | P4  | P4 → controller | Controller → P4 |
+
+The link cards distinguish **INTERFACE ABSENT**, **NO CARRIER**, and **CARRIER
+PRESENT**. An interface can have carrier while packets/SSH still fail. Raw USB
+boot enumeration can also exist without an Ethernet interface. If the controller
+exporter or its netclass collector is unavailable, the cards show **NO
+TELEMETRY** rather than an apparently absent or healthy link.
+
+Use error/drop **rates** to see ongoing failures. Cumulative counters include
+past failures and can reset on reboot or interface re-creation. The selected
+range panels use Prometheus `increase()` and account for observed resets;
+estimates can be fractional because samples are extrapolated to range bounds.
+Missing interface counters remain gaps/unavailable, never fabricated zeroes.
+These are driver-reported errors, not a measured packet-loss percentage; error
+counts can exceed successful packet counts. Carrier changes include startup and
+re-enumeration, so compare them with the link timeline and traffic.
+USB descriptor/address/enumeration failures that occur before an `ethpi*`
+interface exists, and unrelated kernel faults, are outside these network packet
+counters. Check the kernel journal for their detailed causes.
 
 Metrics start when collection is installed; historical data is not backfilled.
 Scrapes occur every 15 seconds; Pi-specific metrics update every 10 seconds.
