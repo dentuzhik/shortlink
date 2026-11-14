@@ -16,6 +16,24 @@ spec:
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie@sha256:5a5dfbde88d5909fd4938189c141f53fb153f53c519f14907dce9e7c04baa153
   enableSuperuserAccess: false
+  certificates:
+    serverAltDNSNames:
+      - db-lab-primary.shortlink.svc.cluster.local
+  managed:
+    services:
+      additional:
+        - selectorType: rw
+          serviceTemplate:
+            metadata:
+              name: shortlink-lab-external
+            spec:
+              type: NodePort
+              externalTrafficPolicy: Cluster
+              ports:
+                - name: postgres
+                  port: 5432
+                  targetPort: 5432
+                  nodePort: 30432
   bootstrap:
     initdb:
       database: shortlink_lab
@@ -45,6 +63,9 @@ spec:
       cpu: "500m"
       memory: "512Mi"
   postgresql:
+    pg_hba:
+      - hostnossl shortlink_lab shortlink_lab 0.0.0.0/0 reject
+      - hostnossl shortlink_lab shortlink_lab ::/0 reject
     synchronous:
       method: any
       number: 1

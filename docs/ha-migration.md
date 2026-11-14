@@ -25,6 +25,10 @@ multi-second connection interruptions. Unexpected failover and zero-error
 application migration remain unqualified. A [read-only recovery investigation](experiments/database-switchover-recovery.md)
 subsequently separated ownership handoff, Service publication and client/write
 recovery; no timing or durability settings were tuned.
+[Private cross-VM connectivity](database-connectivity.md) is now implemented and
+verified with a temporary client in the existing application cluster, including
+TLS identity/authentication and fixture replay. Fastify still uses its old
+database; real-data replication and writer cutover have not begun.
 
 ## Purpose and goals
 

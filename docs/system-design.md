@@ -24,6 +24,19 @@ Traefik selects the HTTP backend using the hostname. A browser creates links
 through Next.js's `/graphql` rewrite and visits short links on the Fastify host.
 [Networking details](kubernetes.md) include the Services and Gateway resources.
 
+## Private database endpoint and service discovery
+
+The disposable database tier has a verified [cross-VM path](database-connectivity.md):
+a Service without a selector and a manually managed EndpointSlice give an
+application-cluster client a stable database name. A private TCP bridge reaches a
+CloudNativePG-managed NodePort Service that selects the current primary. TLS
+identity validation and database authentication span that path end to end.
+
+This demonstrates separating a dependency's logical name from its infrastructure
+address. Endpoint refresh is explicit and the bridge is a single dependency; it
+is not a complete database HA claim. The live Fastify Deployment has not switched
+to this endpoint.
+
 ## Shared application logic and a repository boundary
 
 REST and GraphQL call `createLinkCreator`, which owns URL validation, random

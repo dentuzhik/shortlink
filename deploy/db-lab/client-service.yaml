@@ -1,0 +1,13 @@
+# No selector: the EndpointSlice is generated from the current database VM IP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-lab-primary
+  namespace: shortlink
+  labels:
+    shortlink.dev/exercise: database-connectivity
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      protocol: TCP

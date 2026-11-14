@@ -168,6 +168,10 @@ A passing check also requires normal host memory pressure and at least 20%
 guest available memory. It does not inject sustained traffic, stop a primary,
 prove read-after-write behavior through the live app, or test request retries.
 
+A [private cross-VM endpoint](database-connectivity.md) is now available and
+verified from a temporary application-cluster client. The live Fastify service
+still uses its original database.
+
 No database backups, WAL archive, source replication stream, Grafana integration
 or off-host durability policy is configured for this disposable tier yet. The
 original source backup remains on the Mac. Do not use this lab as the sole home
