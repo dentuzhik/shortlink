@@ -219,3 +219,8 @@ See [observability](observability.md) and [performance](performance.md).
 
 The current Postgres Deployment has one instance and a persistent volume.
 Adding ordinary Deployment replicas would not configure replication or failover.
+
+The [HA migration exercise](ha-migration.md) records the planned dedicated
+database VM, replication and writer handoff, followed by gradual application
+cluster migration. It separates intended goals from implemented guarantees and
+lists the decisions still required.

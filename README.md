@@ -51,6 +51,7 @@ instance in a single-node local cluster.
 | [Development](docs/development.md)         | Compose/host setup, schema migrations, tests and shutdown.                    |
 | [API](docs/api.md)                         | UI, REST and GraphQL creation, redirects and health endpoints.                |
 | [Kubernetes](docs/kubernetes.md)           | Services, Traefik, networking, replicas and local access.                     |
+| [HA migration exercise](docs/ha-migration.md) | Planned database VM, HA goals, data cutover and gradual application migration. |
 | [Observability](docs/observability.md)     | Metrics, Grafana, credentials, CPU/memory allocation and pressure.            |
 | [Delivery](docs/delivery.md)               | GitHub Actions, commit-tagged images, rollouts and rollback.                  |
 | [Browser testing](docs/browser-testing.md) | Playwright smoke tests, isolated CI containers, and k6-assisted web rollouts. |

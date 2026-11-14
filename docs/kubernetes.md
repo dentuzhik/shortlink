@@ -2,6 +2,10 @@
 
 [Project overview](../README.md) · Run commands from the repository root.
 
+The [HA migration exercise](ha-migration.md) documents the planned two-VM,
+multi-cluster destination and migration checkpoints. This guide describes the
+existing single-node deployment; the exercise is not implemented yet.
+
 ## Run in local Kubernetes
 
 With Colima running and `kind` and `kubectl` installed, run:
