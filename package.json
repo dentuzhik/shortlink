@@ -21,6 +21,9 @@
     "build": "pnpm -r run build",
     "start": "pnpm --filter @url-shortener/redirect-service start",
     "test": "pnpm -r run test",
+    "test:e2e": "playwright test",
+    "test:e2e:containers": "node scripts/test-e2e-containers.mjs",
+    "test:web-rollout": "node scripts/test-web-rollout.mjs",
     "test:integration": "sh scripts/test-integration.sh",
     "test:rolling-restart": "node scripts/test-rolling-restart.mjs",
     "typecheck": "pnpm -r run typecheck",
@@ -44,6 +47,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
+    "@playwright/test": "1.65.0",
     "@types/node": "26.6.6",
     "tsx": "4.23.15",
     "typescript": "7.0.2"

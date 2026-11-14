@@ -18,6 +18,12 @@ repeated downloads; newer runs supersede older runs for the same ref.
 | Container image (target, architecture) | Four native builds: Fastify and Next.js on AMD64 and ARM64. Each image's revision label, architecture and baked runtime revision are verified. |
 | Publish multi-platform image (target)  | Combines the exact verified platform indexes, preserving provenance, into one full-commit tag; verifies both resulting platform digests.       |
 
+A separate browser E2E job starts a disposable production-container stack and
+runs the Playwright create-and-follow flow. On main it pulls the exact verified
+AMD64 platform digests; its success gates the final commit tags. Fork pull
+requests build their test stack locally on the runner and never publish.
+See [browser testing](browser-testing.md) for local commands and artifacts.
+
 Pull requests build and validate images without publishing. Successful `main`
 pushes and manual runs on `main` publish:
 

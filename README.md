@@ -45,16 +45,17 @@ instance in a single-node local cluster.
 
 ## Documentation
 
-| Guide                                  | Contents                                                               |
-| :------------------------------------- | :--------------------------------------------------------------------- |
-| [System design](docs/system-design.md) | Request flow, implemented patterns, state boundaries and planned work. |
-| [Development](docs/development.md)     | Compose/host setup, schema migrations, tests and shutdown.             |
-| [API](docs/api.md)                     | UI, REST and GraphQL creation, redirects and health endpoints.         |
-| [Kubernetes](docs/kubernetes.md)       | Services, Traefik, networking, replicas and local access.              |
-| [Observability](docs/observability.md) | Metrics, Grafana, credentials, CPU/memory allocation and pressure.     |
-| [Delivery](docs/delivery.md)           | GitHub Actions, commit-tagged images, rollouts and rollback.           |
-| [Performance](docs/performance.md)     | Targets, test commands and links to recorded experiments.              |
-| [References](docs/references.md)       | Upstream documentation for the tools used here.                        |
+| Guide                                      | Contents                                                                      |
+| :----------------------------------------- | :---------------------------------------------------------------------------- |
+| [System design](docs/system-design.md)     | Request flow, implemented patterns, state boundaries and planned work.        |
+| [Development](docs/development.md)         | Compose/host setup, schema migrations, tests and shutdown.                    |
+| [API](docs/api.md)                         | UI, REST and GraphQL creation, redirects and health endpoints.                |
+| [Kubernetes](docs/kubernetes.md)           | Services, Traefik, networking, replicas and local access.                     |
+| [Observability](docs/observability.md)     | Metrics, Grafana, credentials, CPU/memory allocation and pressure.            |
+| [Delivery](docs/delivery.md)               | GitHub Actions, commit-tagged images, rollouts and rollback.                  |
+| [Browser testing](docs/browser-testing.md) | Playwright smoke tests, isolated CI containers, and k6-assisted web rollouts. |
+| [Performance](docs/performance.md)         | Targets, test commands and links to recorded experiments.                     |
+| [References](docs/references.md)           | Upstream documentation for the tools used here.                               |
 
 Changes are developed in small reviewable increments. Review a diff before
 moving to the next concept; release images identify committed source by Git SHA.

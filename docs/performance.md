@@ -26,6 +26,14 @@ from a different VM size, replica count, route or cache distribution are separat
 measurements. Passing the target workload establishes a tested operating point; ceiling
 measurements are separate.
 
+## Test a web deployment with real browser sessions
+
+[Browser and web deployment tests](browser-testing.md) combine Playwright with
+k6 during web replacement. The initial defaults are 100 redirects/s plus two
+GraphQL creations/s; the command also accepts the existing 1,000/10 workload.
+Creation goes through Next.js and browser flows add extra writes, so its results
+must be distinguished from the Fastify-only REST restart workload below.
+
 ## Test a Fastify rolling restart
 
 With two healthy Fastify replicas in the running Kubernetes stack:
