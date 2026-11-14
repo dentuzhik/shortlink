@@ -1,0 +1,22 @@
+[
+  {
+    "targets": ["127.0.0.1:9100"],
+    "labels": { "node": "cbridge", "role": "controller" }
+  },
+  {
+    "targets": ["192.168.24.115:9100"],
+    "labels": { "node": "p1", "role": "worker" }
+  },
+  {
+    "targets": ["192.168.24.114:9100"],
+    "labels": { "node": "p2", "role": "worker" }
+  },
+  {
+    "targets": ["192.168.24.116:9100"],
+    "labels": { "node": "p3", "role": "worker" }
+  },
+  {
+    "targets": ["192.168.24.117:9100"],
+    "labels": { "node": "p4", "role": "worker" }
+  }
+]
