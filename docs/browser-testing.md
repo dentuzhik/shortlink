@@ -62,7 +62,8 @@ AMD64 digest records and test those exact registry artifacts. Pull requests and
 manual runs on other branches build the production targets in the disposable
 runner instead, without publishing. CI installs Chromium's Linux dependencies
 and uploads reports, failure traces and container logs as `browser-e2e` artifacts.
-The load/rollout experiment below is a separate opt-in local check.
+A second CI job creates a disposable kind cluster and runs the combined k6 and
+Playwright rollout test described below. Both jobs gate final image publication.
 
 ## Run Playwright and k6 during a web rollout
 
@@ -122,6 +123,39 @@ see [browser flow](../tests/e2e/web-flow.mjs),
 [smoke test](../tests/e2e/links.spec.mjs),
 [rollout controller](../scripts/test-web-rollout.mjs), and
 [k6 workload](../benchmarks/web-rollout.js).
+
+## Combined rollout check in GitHub Actions
+
+The **k6 and Playwright during a web rollout** job runs on pushes, pull requests
+and manual workflow runs. It creates a fresh single-node kind cluster, installs
+Postgres, Redis, migrations, Fastify, Next.js and the same Traefik Gateway routes,
+then invokes the same `test:web-rollout` harness. k6 and Chromium run together on
+the GitHub runner while Kubernetes replaces the candidate web pods.
+
+CI uses **100 redirects/s and 2 GraphQL creations/s**, with the same 10/60/15-second
+windows, correctness checks, browser coverage checks and 100ms redirect criterion.
+This checks pod replacement of one candidate image; the local optional commit
+argument covers a change between published versions. Hosted-runner results are
+separate from the Colima throughput measurements.
+
+Trusted main runs test the verified AMD64 image digests directly in kind before
+the final commit tags exist. Pull requests build commit-tagged images from their
+tested source, bake the revision, load them into kind and record the runtime's
+image digests. Both paths check the running revision and use the existing app,
+Gateway and five-second web drain settings.
+
+The cluster has a unique `shortlink-ci-<run-id>-<attempt>` name and its own
+kubeconfig. The harness refuses the default local cluster when `CI` is set, and
+requires kubeconfig/context overrides together. CI maps the Gateway NodePort to
+runner loopback port 8080 during cluster creation, so it needs no local HAProxy
+bridge, Grafana or existing developer cluster.
+
+Tool versions are pinned: kind 0.33.0, Kubernetes node image 1.37.0, kubectl 1.37.2
+and k6 2.3.0. Downloads and the Gateway API definitions have checksum checks; the
+node image is pinned by digest. Diagnostics and cluster deletion run even when
+the test fails. The **web-rollout** artifact retains bootstrap metadata, browser
+failures/traces, k6 results and cluster logs for seven days. The kubeconfig stays
+outside the artifact directory.
 
 ## Recorded validation
 

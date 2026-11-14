@@ -33,6 +33,9 @@ k6 during web replacement. The initial defaults are 100 redirects/s plus two
 GraphQL creations/s; the command also accepts the existing 1,000/10 workload.
 Creation goes through Next.js and browser flows add extra writes, so its results
 must be distinguished from the Fastify-only REST restart workload below.
+The same 100/2 combined check also runs in a disposable kind cluster in CI and
+gates image publication. Its hosted-runner measurements do not establish the
+Colima throughput ceiling.
 
 ## Test a Fastify rolling restart
 

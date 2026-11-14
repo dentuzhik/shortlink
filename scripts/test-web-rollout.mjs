@@ -14,6 +14,7 @@ import {
   openCreator,
 } from "../tests/e2e/web-flow.mjs";
 import { servingPods, templateRelease } from "./lib/redirect-release.mjs";
+import { webTestTarget } from "./lib/web-test-target.mjs";
 
 const [commit, ...extra] = process.argv.slice(2);
 if (extra.length)
@@ -30,14 +31,8 @@ const execute = promisify(execFile);
 const output = async (cmd, args) =>
   (await execute(cmd, args, { timeout: 180000, maxBuffer: 16 * 1024 * 1024 }))
     .stdout;
-const kubeArgs = [
-  "--kubeconfig",
-  ".kind/kubeconfig",
-  "--context",
-  "kind-shortlink",
-  "--namespace",
-  "shortlink",
-];
+const target = webTestTarget(process.env, commit);
+const kubeArgs = target.kubeArgs;
 const kube = (...args) => output("kubectl", [...kubeArgs, ...args]);
 const json = async (...args) => JSON.parse(await kube(...args, "-o", "json"));
 const before = await json("get", "deployment", "web");
@@ -59,13 +54,11 @@ if (
   );
 const appOrigin = "http://app.localhost:8080";
 const shortOrigin = "http://go.localhost:8080";
-const directory = resolve(
-  ".kind/web-rollout",
-  new Date().toISOString().replaceAll(/[:.]/g, "-"),
-);
+const directory = target.directory;
 await mkdir(directory, { recursive: true });
 const report = {
   directory,
+  context: target.context,
   commit,
   rate,
   createRate,
@@ -452,7 +445,8 @@ try {
   }
   report.finishedAt = Date.now();
   report.minSampledAvailable = Math.min(...availability);
-  report.dashboardUrl = `http://grafana.localhost:8080/d/shortlink-overview/shortlink-overview?from=${report.createdAt}&to=${report.finishedAt}`;
+  if (!target.isCI)
+    report.dashboardUrl = `http://grafana.localhost:8080/d/shortlink-overview/shortlink-overview?from=${report.createdAt}&to=${report.finishedAt}`;
   report.browser = {
     flows: report.browserFlows.length,
     failures: report.browserFlows.filter((flow) => !flow.passed).length,
@@ -461,10 +455,11 @@ try {
     `${directory}/run.json`,
     `${JSON.stringify(report, null, 2)}\n`,
   );
-  await writeFile(
-    resolve(".kind/web-rollout/last-run.json"),
-    `${JSON.stringify(report, null, 2)}\n`,
-  );
+  if (!target.isCI)
+    await writeFile(
+      resolve(".kind/web-rollout/last-run.json"),
+      `${JSON.stringify(report, null, 2)}\n`,
+    );
   console.log(
     JSON.stringify(
       {
