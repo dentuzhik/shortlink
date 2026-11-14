@@ -11,6 +11,9 @@ reviewed, and record measured results separately.
 The [initial capacity inventory](experiments/ha-capacity-planning.md) was
 completed on November 14, 2026. It proposes profile budgets and a first-phase
 worker-failure topology; no VM or cluster changes have been made.
+The [backup/restore rehearsal](experiments/backup-restore.md) subsequently passed
+twice; the [procedure](database-recovery.md) and command are available for reuse.
+The single maintenance interruption remains unused.
 
 ## Purpose and goals
 
@@ -102,14 +105,14 @@ A node is a Kubernetes participant; a worker is a node assigned to run workloads
 For kind, nodes are containers inside a VM. Several pods can share one worker.
 A control-plane node manages the cluster and can also run workloads when allowed.
 
-| Failure or change | What the exercise should establish |
-| :---------------- | :--------------------------------- |
-| Application pod replacement | Healthy replicas continue serving while pods drain and routing updates. |
-| Application worker stops | Replicas on other workers remain reachable; recovery and errors are measured. |
-| Postgres process or worker fails | A standby can safely become the sole primary; clients reconnect. |
-| Application VM restarts | Database VM and its data remain running; application traffic still needs its VM. |
-| Database VM stops | Every database replica in that VM is unavailable; this topology does not tolerate it. |
-| Mac or physical disk fails | Both VMs are affected; this is outside the local HA boundary. |
+| Failure or change                | What the exercise should establish                                                    |
+| :------------------------------- | :------------------------------------------------------------------------------------ |
+| Application pod replacement      | Healthy replicas continue serving while pods drain and routing updates.               |
+| Application worker stops         | Replicas on other workers remain reachable; recovery and errors are measured.         |
+| Postgres process or worker fails | A standby can safely become the sole primary; clients reconnect.                      |
+| Application VM restarts          | Database VM and its data remain running; application traffic still needs its VM.      |
+| Database VM stops                | Every database replica in that VM is unavailable; this topology does not tolerate it. |
+| Mac or physical disk fails       | Both VMs are affected; this is outside the local HA boundary.                         |
 
 Control-plane HA is a distinct checkpoint. One control-plane node plus several
 workers does not provide control-plane redundancy. Multiple database replicas
@@ -310,17 +313,17 @@ and update its status and decisions with links to those results.
 
 ## Decisions still required
 
-| Decision | Why it matters |
-| :------- | :------------- |
-| Profile resources and node/control-plane counts | Peak overlap must fit the Mac; worker and control-plane HA are different goals. |
-| Operator, storage and database replica count | Determines automation, recoverability and resource cost. |
-| Synchronous/asynchronous replication and promotion rules | Defines write availability, possible data loss and recovery behavior. |
-| Migration replication method and complete object inventory | Determines copying, compatibility and final handoff steps. |
-| Cross-VM primary endpoint, routing and TLS | Both application generations must reach the correct writer securely. |
-| Creation waiting limit, idempotency and pool handoff | Defines acceptable user behavior and safe retry during writer changes. |
-| Redirect path during writer cutover | Reads must remain correct and immediately reflect successful creations. |
-| Entry routing and percentage measurement | Controls gradual traffic migration without breaking existing connections. |
-| Trial durations, recovery targets and retirement window | Makes acceptance, failure reporting and rollback boundaries explicit. |
+| Decision                                                   | Why it matters                                                                  |
+| :--------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| Profile resources and node/control-plane counts            | Peak overlap must fit the Mac; worker and control-plane HA are different goals. |
+| Operator, storage and database replica count               | Determines automation, recoverability and resource cost.                        |
+| Synchronous/asynchronous replication and promotion rules   | Defines write availability, possible data loss and recovery behavior.           |
+| Migration replication method and complete object inventory | Determines copying, compatibility and final handoff steps.                      |
+| Cross-VM primary endpoint, routing and TLS                 | Both application generations must reach the correct writer securely.            |
+| Creation waiting limit, idempotency and pool handoff       | Defines acceptable user behavior and safe retry during writer changes.          |
+| Redirect path during writer cutover                        | Reads must remain correct and immediately reflect successful creations.         |
+| Entry routing and percentage measurement                   | Controls gradual traffic migration without breaking existing connections.       |
+| Trial durations, recovery targets and retirement window    | Makes acceptance, failure reporting and rollback boundaries explicit.           |
 
 Resolve these incrementally with explanations and evidence; this documentation
 change does not authorize a particular resource allocation or execute a cutover.

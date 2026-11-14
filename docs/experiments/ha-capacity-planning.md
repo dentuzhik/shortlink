@@ -41,26 +41,26 @@ specific to the current source cluster; it is not multi-cluster deployment tooli
 
 ## Measured host and VM resources
 
-| Measurement | Observed value |
-| :---------- | :------------- |
-| Mac | ARM64, model `Mac16,11` |
-| Physical/logical CPU cores | 12 / 12: 8 performance, 4 efficiency |
-| Unified memory | 24 GiB |
-| APFS data volume available | About 213 GiB |
-| macOS memory pressure indicator | `1` (normal) throughout the sample |
-| macOS compressed-memory physical footprint | About 5.46–5.48 GiB |
-| macOS swap used | About 3.40 GiB, unchanged during sampling |
-| New swap-out / swap-in during sample | 0 MiB / 0.125 MiB |
-| Current Colima profile | `default`, running, ARM64, Docker, Virtualization.Framework |
-| Colima version | 0.10.3 |
-| Current VM allocation | 4 CPUs / 4 GiB / 100 GiB data disk |
-| Guest-usable memory | About 3.81 GiB |
-| Guest `MemAvailable` during sample | About 1.90–1.91 GiB |
-| Guest memory not available at busiest sample | About 1.91 GiB; not the same as pod working sets |
-| Guest average CPU non-idle, excluding I/O wait | About 4.9% of four CPUs, or 0.20 cores |
-| Previous-hour minimum / maximum VM available memory | About 1.88 / 2.02 GiB |
-| Previous-hour peak 30-second CPU non-idle | About 11.8% of four CPUs; includes I/O wait in this PromQL calculation |
-| Previous-hour peak 30-second memory / I/O full PSI | About 0.17% / 2.01% |
+| Measurement                                         | Observed value                                                         |
+| :-------------------------------------------------- | :--------------------------------------------------------------------- |
+| Mac                                                 | ARM64, model `Mac16,11`                                                |
+| Physical/logical CPU cores                          | 12 / 12: 8 performance, 4 efficiency                                   |
+| Unified memory                                      | 24 GiB                                                                 |
+| APFS data volume available                          | About 213 GiB                                                          |
+| macOS memory pressure indicator                     | `1` (normal) throughout the sample                                     |
+| macOS compressed-memory physical footprint          | About 5.46–5.48 GiB                                                    |
+| macOS swap used                                     | About 3.40 GiB, unchanged during sampling                              |
+| New swap-out / swap-in during sample                | 0 MiB / 0.125 MiB                                                      |
+| Current Colima profile                              | `default`, running, ARM64, Docker, Virtualization.Framework            |
+| Colima version                                      | 0.10.3                                                                 |
+| Current VM allocation                               | 4 CPUs / 4 GiB / 100 GiB data disk                                     |
+| Guest-usable memory                                 | About 3.81 GiB                                                         |
+| Guest `MemAvailable` during sample                  | About 1.90–1.91 GiB                                                    |
+| Guest memory not available at busiest sample        | About 1.91 GiB; not the same as pod working sets                       |
+| Guest average CPU non-idle, excluding I/O wait      | About 4.9% of four CPUs, or 0.20 cores                                 |
+| Previous-hour minimum / maximum VM available memory | About 1.88 / 2.02 GiB                                                  |
+| Previous-hour peak 30-second CPU non-idle           | About 11.8% of four CPUs; includes I/O wait in this PromQL calculation |
+| Previous-hour peak 30-second memory / I/O full PSI  | About 0.17% / 2.01%                                                    |
 
 Normal pressure and stable swap are encouraging, but the Mac already has a
 substantial compressed-memory footprint. Existing swap use does not prove
@@ -74,12 +74,12 @@ One kind node runs Kubernetes v1.37.0. There are 19 running pods: eight in
 `kube-system`, one storage provisioner, and ten in `shortlink`. The completed
 migration Job is excluded from active resource totals.
 
-| Workload group | Measured pod working-set memory |
-| :------------- | :------------------------------ |
-| All running pods | About 1,269–1,273 MiB |
-| `shortlink` namespace | About 693–697 MiB |
-| `kube-system` | About 557–559 MiB |
-| Storage provisioner | About 18 MiB |
+| Workload group        | Measured pod working-set memory |
+| :-------------------- | :------------------------------ |
+| All running pods      | About 1,269–1,273 MiB           |
+| `shortlink` namespace | About 693–697 MiB               |
+| `kube-system`         | About 557–559 MiB               |
+| Storage provisioner   | About 18 MiB                    |
 
 At the final snapshot, Grafana used about 295 MiB, Prometheus 67 MiB, the two
 Fastify pods 130 MiB combined, Next.js 85 MiB, Postgres 44 MiB, Traefik 38 MiB,
@@ -94,22 +94,22 @@ containers have no memory limit, and no running container has a CPU limit.
 These totals exclude init-container scheduling rules and pod overhead; they are
 not a precise effective scheduler reservation or a guaranteed upper bound.
 
-| Database/storage measurement | Observed value |
-| :--------------------------- | :------------- |
-| Postgres version | 18.6 |
-| Links | 7,764 |
-| Database logical size | 9,410,239 bytes, about 8.97 MiB |
-| Links table plus indexes | 1,409,024 bytes, about 1.34 MiB |
-| Postgres directory on disk | 65,772 KiB, about 64.2 MiB |
-| Database connections | 11 total backends; three client connections including inventory |
-| Configured `max_connections` | 100 |
-| Last-hour sampled API pool total / waiting | At most two open connections / zero waiters |
-| Current `wal_level` | `replica`; logical replication needs `logical` and a restart |
-| WAL sender / replication-slot capacity | 10 / 10 |
-| `max_slot_wal_keep_size` | `-1`: retained WAL from slots is not bounded by this setting |
-| PVC requests | Postgres, Prometheus, Grafana: 1 GiB each |
-| Actual VM data filesystem | About 98 GiB total, 36 GiB used, 58 GiB available |
-| Docker image / build-cache accounting | 21.43 GB images / 11.91 GB build cache |
+| Database/storage measurement               | Observed value                                                  |
+| :----------------------------------------- | :-------------------------------------------------------------- |
+| Postgres version                           | 18.6                                                            |
+| Links                                      | 7,764                                                           |
+| Database logical size                      | 9,410,239 bytes, about 8.97 MiB                                 |
+| Links table plus indexes                   | 1,409,024 bytes, about 1.34 MiB                                 |
+| Postgres directory on disk                 | 65,772 KiB, about 64.2 MiB                                      |
+| Database connections                       | 11 total backends; three client connections including inventory |
+| Configured `max_connections`               | 100                                                             |
+| Last-hour sampled API pool total / waiting | At most two open connections / zero waiters                     |
+| Current `wal_level`                        | `replica`; logical replication needs `logical` and a restart    |
+| WAL sender / replication-slot capacity     | 10 / 10                                                         |
+| `max_slot_wal_keep_size`                   | `-1`: retained WAL from slots is not bounded by this setting    |
+| PVC requests                               | Postgres, Prometheus, Grafana: 1 GiB each                       |
+| Actual VM data filesystem                  | About 98 GiB total, 36 GiB used, 58 GiB available               |
+| Docker image / build-cache accounting      | 21.43 GB images / 11.91 GB build cache                          |
 
 Use the data filesystem as the disk baseline. Docker accounting categories can
 overlap through shared layers and are not additive. No images, caches or volumes
@@ -123,11 +123,11 @@ control-plane node in each destination cluster. Full control-plane HA remains a
 separate sizing and learning increment. Every database instance still shares its
 profile's VM, so this does not survive database-VM or Mac failure.
 
-| Profile | Proposed CPU | Proposed RAM | Virtual data disk | Workloads at peak overlap |
-| :------ | -----------: | -----------: | ----------------: | :------------------------ |
-| Existing application profile `default` | 6 | 6 GiB | Retain 100 GiB | Existing one-node cluster plus replacement cluster with one control plane and three workers; entrypoint and monitoring. |
-| New dedicated database profile, name TBD | 4 | 6 GiB | 40 GiB | One control plane and three workers; three Postgres instances, one per worker, operator and collectors. |
-| Total proposed allocations | 10 | 12 GiB | 140 GiB virtual capacity | Nine kind nodes during overlap, eight after the source cluster is retired. |
+| Profile                                  | Proposed CPU | Proposed RAM |        Virtual data disk | Workloads at peak overlap                                                                                               |
+| :--------------------------------------- | -----------: | -----------: | -----------------------: | :---------------------------------------------------------------------------------------------------------------------- |
+| Existing application profile `default`   |            6 |        6 GiB |           Retain 100 GiB | Existing one-node cluster plus replacement cluster with one control plane and three workers; entrypoint and monitoring. |
+| New dedicated database profile, name TBD |            4 |        6 GiB |                   40 GiB | One control plane and three workers; three Postgres instances, one per worker, operator and collectors.                 |
+| Total proposed allocations               |           10 |       12 GiB | 140 GiB virtual capacity | Nine kind nodes during overlap, eight after the source cluster is retired.                                              |
 
 This increases the application VM from 4/4 to 6/6 during the allowed maintenance
 window. The database profile can first be created while the existing service
@@ -142,13 +142,13 @@ as resource budgets rather than workload guarantees.
 
 ### How the memory estimates were formed
 
-| Application VM allowance | GiB |
-| :----------------------- | --: |
-| Existing full VM baseline, rounded up from measured 1.91 GiB | 2.00 |
-| Extra control plane and three workers, including their runtimes | 1.75 |
+| Application VM allowance                                                 |  GiB |
+| :----------------------------------------------------------------------- | ---: |
+| Existing full VM baseline, rounded up from measured 1.91 GiB             | 2.00 |
+| Extra control plane and three workers, including their runtimes          | 1.75 |
 | New application replicas, Redis and additional scrape/discovery overhead | 1.00 |
-| Remaining margin for growth, startup and rollout | 1.25 |
-| Proposed total | 6.00 |
+| Remaining margin for growth, startup and rollout                         | 1.25 |
+| Proposed total                                                           | 6.00 |
 
 The extra infrastructure and workload allowances are **estimates**, not measured
 new-node costs. The one-GiB workload allowance assumes ordinary working sets;
@@ -156,14 +156,14 @@ it is not the sum of simultaneous container memory limits. Existing monitoring
 is counted in the measured baseline. Budget for any temporary replacement
 monitoring before stopping the source cluster rather than assuming it is free.
 
-| Database VM allowance | GiB |
-| :-------------------- | --: |
+| Database VM allowance                                     |  GiB |
+| :-------------------------------------------------------- | ---: |
 | Control plane and three workers, including their runtimes | 1.75 |
 | Three Postgres instances, planning allowance 512 MiB each | 1.50 |
-| Operator and collectors | 0.25 |
-| Guest OS and unaccounted overhead | 0.50 |
-| Remaining margin for replication, recovery and startup | 2.00 |
-| Proposed total | 6.00 |
+| Operator and collectors                                   | 0.25 |
+| Guest OS and unaccounted overhead                         | 0.50 |
+| Remaining margin for replication, recovery and startup    | 2.00 |
+| Proposed total                                            | 6.00 |
 
 The Postgres allowance is provisional, not a selected operator's default or a
 final memory limit. Validate supported resource settings, shared buffers and
