@@ -1,0 +1,13 @@
+{
+  "kindVersion": "v0.33.0",
+  "kubernetesVersion": "v1.36.4",
+  "nodeImage": "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed",
+  "operatorVersion": "1.30.1",
+  "operatorManifestUrl": "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/v1.30.1/releases/cnpg-1.30.1.yaml",
+  "operatorManifestSha256": "37237f145d8138256ea25ae830f87759255665ff08f8d552fdd8224a5ec032fb",
+  "operatorImage": "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1@sha256:923c267ec29636db3bee20f993d0ec4973fa22998e1adad37da79e4d32b5bc07",
+  "operatorArm64Manifest": "sha256:9a10dd7d7466310d5d543f618478cb905093cfc7a5463b538f449da626660083",
+  "postgresVersion": "18.7",
+  "postgresImage": "ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie@sha256:5a5dfbde88d5909fd4938189c141f53fb153f53c519f14907dce9e7c04baa153",
+  "postgresArm64Manifest": "sha256:e342b11645e508586a863be18542872b735bdea637ebbb20785b775701df7b99"
+}

@@ -213,7 +213,7 @@ See [observability](observability.md) and [performance](performance.md).
 ## Discussed but not implemented
 
 - Warming Redis on successful link creation.
-- Postgres replication/failover and a read-after-write policy for replica reads.
+- Live-application Postgres replication/failover and a read-after-write policy for replica reads.
 - A demonstrated expand/backfill/contract schema migration across app versions.
 - Automatically deploying CI-published images (local deployment is manual).
 
@@ -224,3 +224,7 @@ The [HA migration exercise](ha-migration.md) records the planned dedicated
 database VM, replication and writer handoff, followed by gradual application
 cluster migration. It separates intended goals from implemented guarantees and
 lists the decisions still required.
+
+The separate [CloudNativePG lab](database-ha-lab.md) now demonstrates healthy
+synchronous replication on disposable data. It has not migrated the live
+application or qualified database failover.

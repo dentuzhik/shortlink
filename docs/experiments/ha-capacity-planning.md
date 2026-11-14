@@ -7,6 +7,12 @@ VM resizing, profile/cluster creation, backup/restore rehearsal, replication,
 failover or traffic migration. The proposed destination capacity is not a
 validated performance result or a reservation of physical Mac resources.
 
+A later [CloudNativePG bootstrap trial](cloudnativepg-bootstrap.md) found host
+memory pressure at the proposed six-GiB database allocation. The user approved
+four GiB for the current disposable database VM, which passed the idle resource
+check. Preserve the estimates below as historical planning inputs; they are not
+validation of the later application-cluster overlap.
+
 The migration plan was checkpointed as `a7e3d85` before this exercise. kind remains
 the local platform; K3s is deferred to the later hardware migration.
 

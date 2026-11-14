@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database-lab
+  labels:
+    shortlink.dev/exercise: database-ha
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: shortlink-lab
+  namespace: database-lab
+  labels:
+    shortlink.dev/exercise: database-ha
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie@sha256:5a5dfbde88d5909fd4938189c141f53fb153f53c519f14907dce9e7c04baa153
+  enableSuperuserAccess: false
+  bootstrap:
+    initdb:
+      database: shortlink_lab
+      owner: shortlink_lab
+      postInitApplicationSQL:
+        - >-
+          CREATE TABLE replication_probe (
+            id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            token text NOT NULL UNIQUE,
+            created_at timestamptz NOT NULL DEFAULT now()
+          )
+        - ALTER TABLE replication_probe OWNER TO shortlink_lab
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+    nodeSelector:
+      shortlink.dev/workload: database
+  storage:
+    storageClass: standard
+    size: 5Gi
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: required
+    parameters:
+      synchronous_commit: "on"
+      shared_buffers: "64MB"
+      max_connections: "100"
+      wal_level: "logical"
+      wal_keep_size: "128MB"
+      max_wal_size: "512MB"
+      max_slot_wal_keep_size: "1GB"

@@ -14,6 +14,11 @@ worker-failure topology; no VM or cluster changes have been made.
 The [backup/restore rehearsal](experiments/backup-restore.md) subsequently passed
 twice; the [procedure](database-recovery.md) and command are available for reuse.
 The single maintenance interruption remains unused.
+The [CloudNativePG lab](database-ha-lab.md) is now provisioned with disposable
+data and verified healthy synchronous replication. The user selected one required
+synchronous standby. Its [bootstrap report](experiments/cloudnativepg-bootstrap.md)
+records the failed six-GiB host gate and the approved four-GiB database profile;
+full overlap capacity, failover and real-data migration remain unverified.
 
 ## Purpose and goals
 
