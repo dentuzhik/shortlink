@@ -162,7 +162,7 @@ export function visit(fixtures) {
 
 export function createLink() {
   const phase = currentPhase();
-  const targetUrl = "https://example.com/rolling-restart/created-under-load";
+  const targetUrl = `https://example.com/rolling-restart/created-under-load/${exec.scenario.startTime}/${exec.scenario.iterationInTest}`;
   const startedAt = Date.now();
   const response = http.post(
     `${baseUrl}/links`,
@@ -188,9 +188,31 @@ export function createLink() {
     response.status === 201 &&
     link?.targetUrl === targetUrl &&
     /^[A-Za-z0-9_-]{8}$/.test(link?.code ?? "");
-  creationCorrect.add(valid, { phase });
+  let immediatelyUsable = false;
+  if (valid) {
+    console.log(
+      `CREATION_ACK ${JSON.stringify({ code: link.code, targetUrl })}`,
+    );
+    const verificationStartedAt = Date.now();
+    const redirect = http.get(`${baseUrl}/${link.code}`, {
+      headers: { Host: "go.localhost:8080" },
+      redirects: 0,
+      timeout: "3s",
+      responseCallback: expectedRedirect,
+      tags: { name: "GET /:code (newly created)", phase },
+    });
+    immediatelyUsable =
+      redirect.status === 302 &&
+      redirect.headers.Location === targetUrl &&
+      redirect.headers["Cache-Control"] === "no-store";
+    const verificationMs = Date.now() - verificationStartedAt;
+    correct.add(immediatelyUsable, { phase });
+    withinBudget.add(immediatelyUsable && verificationMs <= 100, { phase });
+    duration.add(verificationMs, { phase });
+  }
+  creationCorrect.add(valid && immediatelyUsable, { phase });
   creationDuration.add(ms, { phase });
-  if (!valid && failuresLogged++ === 0) {
+  if ((!valid || !immediatelyUsable) && failuresLogged++ === 0) {
     console.warn(
       `CREATION_FAILURE ${JSON.stringify({
         startedAt,

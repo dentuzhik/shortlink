@@ -14,9 +14,17 @@ const target = [
   "-n",
   "shortlink",
 ];
-const [action, ...extra] = process.argv.slice(2);
-if (!["status", "begin", "end"].includes(action) || extra.length) {
-  throw new Error("Use runtime-maintenance.mjs status|begin|end");
+const [action, targetDatabase, ...extra] = process.argv.slice(2);
+if (
+  !["status", "begin", "end", "prepare", "switch"].includes(action) ||
+  extra.length ||
+  (["prepare", "switch"].includes(action)
+    ? !["source", "ha"].includes(targetDatabase)
+    : targetDatabase !== undefined)
+) {
+  throw new Error(
+    "Use runtime-maintenance.mjs status|begin|end | prepare|switch source|ha",
+  );
 }
 const kube = async (...args) =>
   JSON.parse(
@@ -63,7 +71,7 @@ async function statuses() {
     }),
   );
 }
-async function waitFor(config) {
+async function waitFor(config, requireApplied = true) {
   const deadline = Date.now() + 30000;
   let observed;
   while (Date.now() < deadline) {
@@ -72,7 +80,10 @@ async function waitFor(config) {
     );
     if (
       current.revision !== config.revision ||
-      current.creationMode !== config.creationMode
+      current.creationMode !== config.creationMode ||
+      (current.activeDatabase ?? "source") !==
+        (config.activeDatabase ?? "source") ||
+      (current.prepareDatabase ?? null) !== (config.prepareDatabase ?? null)
     )
       throw new Error(
         "Control changed concurrently; inspect status before continuing",
@@ -92,7 +103,9 @@ async function waitFor(config) {
       observed.every(
         (pod) =>
           pod.configurationCurrent &&
+          (!requireApplied || pod.configurationApplied) &&
           pod.observedRevision === config.revision &&
+          pod.activeDatabase === (config.activeDatabase ?? "source") &&
           pod.creationMode === config.creationMode &&
           (config.creationMode === "reject"
             ? pod.drained && !pod.acceptingCreations
@@ -123,14 +136,42 @@ try {
       JSON.stringify({ desired: current, pods: await statuses() }, null, 2),
     );
   } else {
-    const creationMode = action === "begin" ? "reject" : "accept";
+    if (action === "switch" && current.creationMode !== "reject")
+      throw new Error("Begin maintenance before switching pools");
+    const creationMode =
+      action === "begin"
+        ? "reject"
+        : action === "end"
+          ? "accept"
+          : current.creationMode;
     // A repeated begin/end still verifies the current desired state.
-    const next =
-      current.creationMode === creationMode
-        ? current
-        : { revision: current.revision + 1, creationMode };
+    const change =
+      action === "prepare"
+        ? { prepareDatabase: targetDatabase }
+        : action === "switch"
+          ? { activeDatabase: targetDatabase, prepareDatabase: null }
+          : { creationMode };
+    const changed = Object.entries(change).some(
+      ([key, value]) => current[key] !== value,
+    );
+    const next = changed
+      ? { ...current, ...change, revision: current.revision + 1 }
+      : current;
     parseMaintenanceConfig(next);
-    await waitFor(current); // Refuse unsupported or unacknowledged replicas before changing modes.
+    const acknowledged = await waitFor(current, action !== "prepare");
+    if (
+      action === "switch" &&
+      targetDatabase !== (current.activeDatabase ?? "source") &&
+      !acknowledged.every(
+        (pod) =>
+          pod.database?.preparedDatabase === targetDatabase &&
+          pod.database.candidateReady,
+      )
+    ) {
+      throw new Error(
+        "Prepare the selected pool on every replica before switching",
+      );
+    }
     if (next !== current) {
       await kube(
         "patch",

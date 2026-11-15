@@ -32,6 +32,7 @@ export async function maintenanceApi() {
   let token = randomUUID();
   await writeFile(`${directory}/token`, token, { mode: 0o600 });
   let available = false;
+  let watchAvailable = true;
   let version = 1;
   let config: unknown = { revision: 1, creationMode: "accept" };
   const streams = new Set<ServerResponse>();
@@ -59,6 +60,10 @@ export async function maintenanceApi() {
       }
       const url = new URL(request.url ?? "/", "https://localhost");
       if (url.searchParams.get("watch") === "true") {
+        if (!watchAvailable) {
+          response.writeHead(503).end();
+          return;
+        }
         if (
           url.searchParams.get("fieldSelector") !==
           "metadata.name=shortlink-runtime"
@@ -95,6 +100,9 @@ export async function maintenanceApi() {
     setAvailable(value: boolean) {
       available = value;
       if (!value) for (const stream of streams) stream.destroy();
+    },
+    setWatchAvailable(value: boolean) {
+      watchAvailable = value;
     },
     update(value: unknown) {
       config = value;

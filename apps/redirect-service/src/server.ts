@@ -1,15 +1,37 @@
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { readDatabaseUrl } from "./database.js";
+import type { DatabaseTarget } from "./database-pools.js";
 import {
   kubernetesMaintenanceSource,
   startMaintenanceWatch,
 } from "./maintenance-watch.js";
-import { RuntimeMaintenance } from "./runtime-maintenance.js";
+import {
+  type MaintenanceConfig,
+  RuntimeMaintenance,
+} from "./runtime-maintenance.js";
 
 const revision = process.env.APP_REVISION ?? "development";
 const configMap = process.env.MAINTENANCE_CONFIGMAP;
 const maintenance = new RuntimeMaintenance(!configMap);
+let ha: DatabaseTarget | undefined;
+if (process.env.HA_DATABASE_URL) {
+  if (!process.env.HA_DATABASE_CA_FILE || !process.env.HA_DATABASE_SERVERNAME) {
+    throw new Error("HA database requires a CA file and TLS server name");
+  }
+  ha = {
+    connectionString: readDatabaseUrl(process.env.HA_DATABASE_URL),
+    expectedDatabase: "shortener",
+    expectedRole: "shortlink_lab",
+    ssl: {
+      ca: readFileSync(process.env.HA_DATABASE_CA_FILE, "utf8"),
+      servername: process.env.HA_DATABASE_SERVERNAME,
+    },
+    requireTLS: true,
+    requireNonSuperuser: true,
+  };
+}
 const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   poolMax: Number(process.env.DB_POOL_MAX ?? 5),
   reportPoolWait: process.env.DB_POOL_TIMING === "1",
@@ -21,6 +43,7 @@ const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   ),
   revision,
   maintenance,
+  databaseTargets: ha ? { ha } : {},
 });
 if (configMap) {
   const namespace = process.env.POD_NAMESPACE;
@@ -35,6 +58,10 @@ if (configMap) {
       app.log.warn(
         "Runtime maintenance configuration unavailable; rejecting creations",
       ),
+    1000,
+    app.getDecorator<(config: MaintenanceConfig) => Promise<void>>(
+      "applyRuntimeConfig",
+    ),
   );
   app.addHook("onClose", watcher.stop);
 }

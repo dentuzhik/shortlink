@@ -64,7 +64,10 @@
     "maintenance:status": "node scripts/runtime-maintenance.mjs status",
     "maintenance:begin": "node scripts/runtime-maintenance.mjs begin",
     "maintenance:end": "node scripts/runtime-maintenance.mjs end",
-    "test:maintenance:k8s": "pnpm --filter @url-shortener/redirect-service... build && node scripts/test-runtime-maintenance.mjs"
+    "test:maintenance:k8s": "pnpm --filter @url-shortener/redirect-service... build && node scripts/test-runtime-maintenance.mjs",
+    "maintenance:prepare": "node scripts/runtime-maintenance.mjs prepare",
+    "maintenance:switch": "node scripts/runtime-maintenance.mjs switch",
+    "test:fastify-rollout": "node scripts/test-rolling-restart.mjs --deploy"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

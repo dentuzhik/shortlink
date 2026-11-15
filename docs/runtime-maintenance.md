@@ -4,7 +4,9 @@
 
 **Status:** implemented and tested for review. The live Fastify Deployment has
 not been changed. This increment controls creation admission only; it does not
-switch pools, fence database writers, or perform a cutover.
+fence database writers or perform a cutover. The subsequent
+[pool-switching increment](database-pool-switching.md) adds runtime pool selection
+and remains uncommitted for review.
 
 ## Configuration and behavior
 
@@ -21,8 +23,9 @@ The ConfigMap contains one `control.json` value:
 ```
 
 Only positive safe-integer revisions and `accept`/`reject` modes are supported.
-Unknown fields are rejected, including database-selection fields: pool switching
-is deliberately absent from this increment. Changing a mode requires a larger
+Unknown fields are rejected. The subsequent pool increment adds the optional
+`activeDatabase` and `prepareDatabase` aliases; see
+[pool selection](database-pool-switching.md). Changing a mode requires a larger
 revision. Reusing a revision with different contents or delivering an older
 revision closes creation admission until valid current configuration is read.
 
@@ -53,7 +56,8 @@ manifest explicitly enables runtime control and supplies `POD_NAMESPACE`.
 
 ## Readiness and internal status
 
-`/readyz` requires an initially loaded configuration and a successful query on
+`/readyz` requires an initially loaded configuration, a first successful watch
+synchronization and a successful query on
 the existing active pool. Maintenance itself leaves readiness healthy so the
 Service continues routing redirects. If control fails after a valid initial
 load, reads can remain ready while creation fails closed. `/healthz` continues
@@ -153,8 +157,9 @@ credential files afterward and records results under
 or modify the live Deployment/databases. Forced termination may leave a namespace
 named `maintenance-test-*`; inspect its ownership before cleanup.
 
-Pool switching, destination connection preparation, database fencing, idempotency,
-creation latency policy and a live traffic rehearsal remain separate checkpoints.
+Runtime pool switching and preparation are now implemented in a separate tested
+diff. Database fencing, idempotency, creation latency policy and a live traffic
+rehearsal remain separate checkpoints.
 
 Recorded local verification on November 15, 2026: 41 Fastify unit tests and 15
 Postgres/Redis integration tests passed, as did the real Kubernetes watch/RBAC

@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { shortLinkOrigin } from "../apps/web/lib/runtime-config.ts";
+import {
+  assertSourceConfiguration,
+  runtimePodSpec,
+} from "./lib/fastify-rollout.mjs";
 import { platformDigest, verifyImageMetadata } from "./lib/published-image.mjs";
 import {
   imageDigest,
@@ -34,7 +38,15 @@ const kubeJson = async (...args) =>
 const args = process.argv.slice(2);
 const target = args[0] === "web" ? args.shift() : "redirect";
 const profile = releaseTarget(target);
+const runtimeControl = args.includes("--runtime-control");
+if (runtimeControl) args.splice(args.indexOf("--runtime-control"), 1);
 const [action, argument, ...extra] = args;
+if (
+  runtimeControl &&
+  (target !== "redirect" || !["deploy", "deploy-local"].includes(action))
+) {
+  throw new Error("--runtime-control applies only to Fastify deployment");
+}
 if (
   !["build", "deploy", "deploy-local", "rollback", "status"].includes(action) ||
   extra.length
@@ -406,6 +418,33 @@ if (action === "status") {
             { name: "SHORT_LINK_ORIGIN", value: origin, valueFrom: null },
           ];
         }
+        if (runtimeControl) {
+          const server = await output("git", [
+            "show",
+            `${revision}:apps/redirect-service/src/server.ts`,
+          ]);
+          if (!server.includes("applyRuntimeConfig"))
+            throw new Error("Selected image predates runtime database control");
+          await run("kubectl", [
+            ...kubeArgs,
+            "apply",
+            "-f",
+            "deploy/k8s/runtime-maintenance.yaml",
+          ]);
+          const maps = (await kubeJson("get", "configmaps")).items;
+          const control = maps.find(
+            (map) => map.metadata.name === "shortlink-runtime",
+          );
+          if (control)
+            assertSourceConfiguration(JSON.parse(control.data["control.json"]));
+          else
+            await run("kubectl", [
+              ...kubeArgs,
+              "create",
+              "-f",
+              "deploy/k8s/runtime-control.yaml",
+            ]);
+        }
         await kube(
           "patch",
           "deployment",
@@ -428,9 +467,9 @@ if (action === "status") {
                       report.release.indexDigest ?? null,
                   },
                 },
-                spec: {
-                  containers: [container],
-                },
+                spec: runtimeControl
+                  ? runtimePodSpec(container)
+                  : { containers: [container] },
               },
             },
           }),

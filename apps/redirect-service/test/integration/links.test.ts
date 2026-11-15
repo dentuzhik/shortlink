@@ -40,6 +40,7 @@ const { kubernetesMaintenanceSource, startMaintenanceWatch } = createRequire(
 describe("links with Postgres", () => {
   let postgres: StartedPostgreSqlContainer | undefined;
   let databaseUrl: string;
+  let targetDatabaseUrl: string;
   let app: ReturnType<typeof buildApp>;
 
   beforeAll(async () => {
@@ -54,6 +55,20 @@ describe("links with Postgres", () => {
       timeout: 30_000,
     });
 
+    const admin = new Client({ connectionString: databaseUrl });
+    await admin.connect();
+    try {
+      await admin.query("CREATE DATABASE shortener_pool_target");
+    } finally {
+      await admin.end();
+    }
+    const targetUrl = new URL(databaseUrl);
+    targetUrl.pathname = "/shortener_pool_target";
+    targetDatabaseUrl = targetUrl.href;
+    await run("pnpm", ["--workspace-root", "run", "db:migrate"], {
+      env: { ...process.env, DATABASE_URL: targetDatabaseUrl },
+      timeout: 30000,
+    });
     app = buildApp(databaseUrl);
     app.log.level = "silent";
   }, 120_000);
@@ -241,6 +256,7 @@ describe("links with Postgres", () => {
         kubernetesMaintenanceSource("shortlink", "shortlink-runtime", api),
         () => {},
         10,
+        instance.getDecorator("applyRuntimeConfig"),
       );
       instance.addHook("onClose", watcher.stop);
       instances.push(instance);
@@ -287,7 +303,15 @@ describe("links with Postgres", () => {
       expect((await first.inject("/readyz")).statusCode).toBe(503);
       expect((await rest(first)).statusCode).toBe(503);
       expect((await graphql(second)).statusCode).toBe(503);
+      api.setWatchAvailable(false);
       api.setAvailable(true);
+      await both({
+        configurationLoaded: true,
+        configurationInitialized: false,
+      });
+      expect((await first.inject("/readyz")).statusCode).toBe(503);
+      expect((await rest(first)).statusCode).toBe(503);
+      api.setWatchAvailable(true);
       await both({ observedRevision: 1, acceptingCreations: true });
       const created = await rest(first);
       expect(created.statusCode).toBe(201);
@@ -407,6 +431,320 @@ describe("links with Postgres", () => {
     }, 120_000);
 
     beforeEach(() => waitForCache(cachedApp));
+
+    test("switches both transports, readiness, metrics and cache misses while an old lookup drains", async () => {
+      const api = await maintenanceApi();
+      const instances: ReturnType<typeof buildApp>[] = [];
+      const start = () => {
+        const control = new RuntimeMaintenance();
+        const instance = buildApp(databaseUrl, {
+          maintenance: control,
+          redisUrl,
+          reportCacheHit: true,
+          poolMax: 2,
+          redirectCheckoutTimeoutMs: 400,
+          databaseTargets: { ha: { connectionString: targetDatabaseUrl } },
+        });
+        instance.log.level = "silent";
+        const watcher = startMaintenanceWatch(
+          control,
+          kubernetesMaintenanceSource("shortlink", "shortlink-runtime", api),
+          () => {},
+          10,
+          instance.getDecorator("applyRuntimeConfig"),
+        );
+        instance.addHook("onClose", watcher.stop);
+        instances.push(instance);
+        return instance;
+      };
+      const status = async (instance: ReturnType<typeof buildApp>) =>
+        (
+          await instance
+            .getDecorator<FastifyInstance>("metricsServer")
+            .inject("/internal/maintenance")
+        ).json();
+      let instance = start();
+      const apply = async (
+        config: Record<string, unknown>,
+        expected: Record<string, unknown>,
+      ) => {
+        api.update(config);
+        await vi.waitFor(
+          async () => expect(await status(instance)).toMatchObject(expected),
+          { interval: 5, timeout: 2000 },
+        );
+      };
+      const source = new Client({ connectionString: databaseUrl });
+      const target = new Client({ connectionString: targetDatabaseUrl });
+      let oldLookup: Promise<unknown> | undefined;
+      try {
+        await Promise.all([source.connect(), target.connect()]);
+        api.setAvailable(true);
+        await vi.waitFor(async () =>
+          expect(await status(instance)).toMatchObject({
+            configurationApplied: true,
+            activeDatabase: "source",
+          }),
+        );
+        const targetUrl = "https://example.test/pool-handoff";
+        const baseline = await instance.inject({
+          method: "POST",
+          url: "/links",
+          payload: { targetUrl },
+        });
+        expect(baseline.statusCode).toBe(201);
+        const common = baseline.json<{ code: string; createdAt: string }>();
+        await target.query(
+          "INSERT INTO links(code,target_url,created_at) VALUES($1,$2,$3)",
+          [common.code, targetUrl, common.createdAt],
+        );
+        const onlyTarget = "poolOnly";
+        await redis.del(`shortlink:redirect:${onlyTarget}`);
+        await target.query("INSERT INTO links(code,target_url) VALUES($1,$2)", [
+          onlyTarget,
+          targetUrl,
+        ]);
+        await apply(
+          { revision: 2, creationMode: "accept", prepareDatabase: "ha" },
+          {
+            configurationApplied: true,
+            activeDatabase: "source",
+            acceptingCreations: true,
+            database: {
+              preparedDatabase: "ha",
+              candidateReady: true,
+              appliedRevision: 2,
+            },
+          },
+        );
+        expect((await instance.inject(`/${common.code}`)).statusCode).toBe(302);
+        await apply(
+          { revision: 3, creationMode: "reject", prepareDatabase: "ha" },
+          { configurationApplied: true, drained: true },
+        );
+        await source.query("BEGIN");
+        await source.query("LOCK TABLE links IN ACCESS EXCLUSIVE MODE");
+        const read = instance
+          .inject(`/${onlyTarget}`)
+          .then((response) => response);
+        oldLookup = read;
+        await vi.waitFor(
+          async () => {
+            const result = await source.query(
+              "SELECT count(*)::int AS count FROM pg_locks WHERE relation='links'::regclass AND mode='AccessShareLock' AND NOT granted",
+            );
+            expect(result.rows[0].count).toBe(1);
+          },
+          { interval: 5, timeout: 150 },
+        );
+        await apply(
+          {
+            revision: 4,
+            creationMode: "reject",
+            activeDatabase: "ha",
+            prepareDatabase: null,
+          },
+          {
+            configurationApplied: true,
+            activeDatabase: "ha",
+            drained: true,
+            database: {
+              appliedRevision: 4,
+              retiringPools: [{ database: "source", inflightOperations: 1 }],
+            },
+          },
+        );
+        // A post-switch request must not coalesce onto the old source's missing-row lookup.
+        const current = await instance.inject(`/${onlyTarget}`);
+        expect(current.statusCode).toBe(302);
+        expect(current.headers.location).toBe(targetUrl);
+        expect(current.headers["x-cache"]).not.toBe("COALESCED");
+        expect((await instance.inject("/readyz")).statusCode).toBe(200);
+        const metrics = (
+          await instance
+            .getDecorator<FastifyInstance>("metricsServer")
+            .inject("/metrics")
+        ).body;
+        expect(metrics).toContain(
+          'shortlink_db_pool_connections{state="in_use"} 0',
+        );
+        expect(
+          (
+            await instance.inject({
+              method: "POST",
+              url: "/links",
+              payload: { targetUrl },
+            })
+          ).statusCode,
+        ).toBe(503);
+        await source.query("ROLLBACK");
+        expect((await read).statusCode).toBe(404);
+        await vi.waitFor(async () =>
+          expect((await status(instance)).database.retiringPools).toEqual([]),
+        );
+        await apply(
+          { revision: 5, creationMode: "accept", activeDatabase: "ha" },
+          { configurationApplied: true, acceptingCreations: true },
+        );
+        const rest = await instance.inject({
+          method: "POST",
+          url: "/links",
+          payload: { targetUrl },
+        });
+        const graphql = await instance.inject({
+          method: "POST",
+          url: "/graphql",
+          payload: {
+            query:
+              "mutation($input:CreateLinkInput!){createLink(input:$input){code}}",
+            variables: { input: { targetUrl } },
+          },
+        });
+        expect(rest.statusCode).toBe(201);
+        expect(graphql.statusCode).toBe(200);
+        const codes = [
+          rest.json<{ code: string }>().code,
+          graphql.json<{ data: { createLink: { code: string } } }>().data
+            .createLink.code,
+        ];
+        expect(
+          (
+            await source.query(
+              "SELECT count(*)::int AS count FROM links WHERE code=ANY($1::text[])",
+              [codes],
+            )
+          ).rows[0].count,
+        ).toBe(0);
+        expect(
+          (
+            await target.query(
+              "SELECT count(*)::int AS count FROM links WHERE code=ANY($1::text[])",
+              [codes],
+            )
+          ).rows[0].count,
+        ).toBe(2);
+        for (const code of codes)
+          expect((await instance.inject(`/${code}`)).headers.location).toBe(
+            targetUrl,
+          );
+        await instance.close();
+        instance = start();
+        await vi.waitFor(async () =>
+          expect(await status(instance)).toMatchObject({
+            activeDatabase: "ha",
+            configurationApplied: true,
+            acceptingCreations: true,
+          }),
+        );
+        expect((await instance.inject(`/${common.code}`)).statusCode).toBe(302);
+        // Readiness must follow the HA pool, rather than the original source connection.
+        const lockTarget = new Client({ connectionString: targetDatabaseUrl });
+        await lockTarget.connect();
+        try {
+          await lockTarget.query(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND application_name='redirect-service'",
+          );
+          expect((await instance.inject("/readyz")).statusCode).toBe(200); // A replacement HA connection is usable.
+        } finally {
+          await lockTarget.end();
+        }
+      } finally {
+        await source.query("ROLLBACK");
+        if (oldLookup) await oldLookup;
+        await Promise.all([source.end(), target.end()]);
+        await Promise.all(instances.map((app) => app.close()));
+        await api.close();
+        await redis.del("shortlink:redirect:poolOnly");
+      }
+    }, 20000);
+
+    test.each([
+      { expectedDatabase: "wrong_database" },
+      { expectedRole: "wrong_role" },
+      { requireTLS: true },
+      { requireNonSuperuser: true },
+      { connectionString: "postgres://test:test@127.0.0.1:1/unreachable" },
+    ])(
+      "failed candidate validation leaves the source serving: %j",
+      async (invalidTarget) => {
+        const api = await maintenanceApi();
+        const control = new RuntimeMaintenance();
+        const instance = buildApp(databaseUrl, {
+          maintenance: control,
+          databaseTargets: {
+            ha: { connectionString: targetDatabaseUrl, ...invalidTarget },
+          },
+        });
+        instance.log.level = "silent";
+        const watcher = startMaintenanceWatch(
+          control,
+          kubernetesMaintenanceSource("shortlink", "shortlink-runtime", api),
+          () => {},
+          10,
+          instance.getDecorator("applyRuntimeConfig"),
+        );
+        instance.addHook("onClose", watcher.stop);
+        const status = async () =>
+          (
+            await instance
+              .getDecorator<FastifyInstance>("metricsServer")
+              .inject("/internal/maintenance")
+          ).json();
+        try {
+          api.setAvailable(true);
+          await vi.waitFor(async () =>
+            expect(await status()).toMatchObject({
+              configurationApplied: true,
+            }),
+          );
+          api.update({
+            revision: 2,
+            creationMode: "accept",
+            prepareDatabase: "ha",
+          });
+          await vi.waitFor(
+            async () =>
+              expect(await status()).toMatchObject({
+                observedRevision: 2,
+                configurationApplied: false,
+                activeDatabase: "source",
+                acceptingCreations: true,
+                database: {
+                  preparedDatabase: null,
+                  error: "database_configuration_failed",
+                },
+              }),
+            { interval: 5, timeout: 2000 },
+          );
+          expect((await instance.inject("/readyz")).statusCode).toBe(200);
+          expect(
+            (
+              await instance.inject({
+                method: "POST",
+                url: "/links",
+                payload: {
+                  targetUrl: "https://example.test/failed-pool-preparation",
+                },
+              })
+            ).statusCode,
+          ).toBe(201);
+          api.update({
+            revision: 3,
+            creationMode: "accept",
+            prepareDatabase: null,
+          });
+          await vi.waitFor(async () =>
+            expect(await status()).toMatchObject({
+              configurationApplied: true,
+              database: { error: null },
+            }),
+          );
+        } finally {
+          await instance.close();
+          await api.close();
+        }
+      },
+    );
 
     afterAll(async () => {
       try {

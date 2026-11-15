@@ -60,6 +60,15 @@ counts let an operator wait for acknowledged transitions. Startup and known
 control failures close creation admission. This is implemented and tested for
 review, not yet rolled out to the live app, and does not replace database fencing.
 
+## Prepared pools and operation draining
+
+The [pool manager](database-pool-switching.md) prepares a candidate without moving
+traffic, then changes the active generation during drained creation maintenance.
+Existing reads finish on their captured pool, while subsequent lookups, readiness
+and pool metrics use the new one. Cache coalescing also follows the generation.
+Tests verify this on two disposable databases; live rollout and writer fencing
+remain later steps.
+
 ## Controlled maintenance boundary and subscriber credentials
 
 The [source maintenance bundle](source-maintenance.md) closes one public bridge

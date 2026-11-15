@@ -146,8 +146,9 @@ both databases contain the same finalized data and application writes are held.
 This is increased creation latency if waiting requests succeed within the agreed
 limit; timeouts or rejected requests are partial unavailability. Measure the
 handoff before choosing a creation latency/waiting budget. The runtime gate now
-provides multi-replica creation admission control; the startup pool and graceful shutdown still do not implement hot pool handoff or
-idempotency for ambiguous write outcomes. The final mechanism
+provides multi-replica creation admission control. [Pool switching](database-pool-switching.md)
+is also implemented and tested for review, with no live rollout. Idempotency and
+safe handling of ambiguous write outcomes remain future work. The final mechanism
 still needs design and tests; a DNS change does not retarget existing connections.
 
 Reading the destination before write cutover is possible, but asynchronous lag

@@ -37,6 +37,46 @@ The same 100/2 combined check also runs in a disposable kind cluster in CI and
 gates image publication. Its hosted-runner measurements do not establish the
 Colima throughput ceiling.
 
+## Test a versioned Fastify rollout
+
+The [pool-switching increment](database-pool-switching.md) prepares a test that
+ships a different Fastify image while traffic continues. Run it only after the
+reviewed commit is published (or build its committed snapshot locally):
+
+```sh
+RATE=1000 CREATE_RATE=10 pnpm test:fastify-rollout FULL_GIT_SHA
+# Alternative using a committed local image instead of GHCR:
+RATE=1000 CREATE_RATE=10 node scripts/test-rolling-restart.mjs --deploy-local FULL_GIT_SHA
+```
+
+This is a real deployment operation, not an inspection command. It has not yet
+been executed for the pool-switching image. Docker context is explicitly Colima;
+Kubernetes remains the existing kind-shortlink context and shortlink namespace.
+
+The existing 90-second workload continues: 20 seconds baseline, a 40-second
+rollout window, then 30 seconds after. Local image building happens before load;
+registry resolution/pulling and deployment verification occur in the rollout
+window. A deployment that misses the window fails rather than silently changing
+phase boundaries. Passing requires zero request failures/dropped starts, correct
+creations and at least 99% correct redirects within 100 ms separately in each
+phase. Each creation also immediately verifies its redirect, adding ten probe
+reads/s to the scheduled 1,000 redirects/s. These verification reads contribute
+to the redirect correctness/latency metrics.
+
+The release command installs runtime RBAC, creates the initial ConfigMap only
+if absent and patches the image, service account and runtime environment in one
+pod-template update. It preserves the source database endpoint. The trial refuses
+a ConfigMap already in maintenance, selecting HA or preparing a target. Both
+replacement replicas must report full source configuration acknowledgement.
+It does not perform a database cutover or intentionally reject creations.
+
+Acknowledged creations are journaled in k6.log and acknowledged-creations.json;
+a successful run compares every code/destination with source Postgres after
+traffic ends. Failed trials retain their journal for inspection. Image revision,
+pod/endpoint timeline, deployment output, per-pod logs and client results remain
+under .kind/rolling-restart/. Creation latency is reported, with no newly invented
+creation latency threshold.
+
 ## Test a Fastify rolling restart
 
 With two healthy Fastify replicas in the running Kubernetes stack:

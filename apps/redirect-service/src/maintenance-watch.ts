@@ -3,7 +3,10 @@ import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout as delay } from "node:timers/promises";
-import type { RuntimeMaintenance } from "./runtime-maintenance.js";
+import type {
+  MaintenanceConfig,
+  RuntimeMaintenance,
+} from "./runtime-maintenance.js";
 
 export type ConfigMapDocument = {
   metadata?: { resourceVersion?: string };
@@ -137,13 +140,15 @@ export function startMaintenanceWatch(
   source: MaintenanceSource,
   onUnavailable: () => void,
   retryMs = 1000,
+  applyDatabase?: (config: MaintenanceConfig) => Promise<void>,
 ) {
   const abort = new AbortController();
   const { signal } = abort;
-  const observe = (document: ConfigMapDocument) => {
+  const observe = async (document: ConfigMapDocument) => {
     const text = document.data?.["control.json"];
     if (!text) throw new Error("Missing maintenance configuration");
-    control.observe(JSON.parse(text));
+    const config = control.observe(JSON.parse(text));
+    await applyDatabase?.(config);
   };
   const done = (async () => {
     while (!signal.aborted) {
@@ -153,14 +158,14 @@ export function startMaintenanceWatch(
         const resourceVersion = document.metadata?.resourceVersion;
         if (!resourceVersion)
           throw new Error("Missing ConfigMap resourceVersion");
-        observe(document);
+        await observe(document);
         for await (const event of source.watch(resourceVersion, signal, () =>
           control.setConnected(true),
         )) {
           if (event.type === "BOOKMARK") continue;
           if (!["ADDED", "MODIFIED"].includes(event.type))
             throw new Error("Maintenance watch lost its configuration");
-          observe(event.object);
+          await observe(event.object);
         }
         // Normal server watch expiry renews from a fresh GET without reopening gates.
       } catch {

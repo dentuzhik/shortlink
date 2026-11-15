@@ -40,8 +40,9 @@ matched on the new primary and both standbys. The old source remains the only
 application writer. [Runtime creation maintenance](runtime-maintenance.md) is now
 implemented and tested for review, with no live rollout. It supports explicit
 creation rejection during maintenance; no final maintenance-window budget or
-live handoff has been qualified. Pool switching, database fencing and safe
-handling of ambiguous write outcomes remain separate increments.
+live handoff has been qualified. [Pool switching](database-pool-switching.md) is now implemented with fixture
+tests for review. Database fencing and safe handling of ambiguous write outcomes
+remain separate increments; no new Fastify image has been rolled out yet.
 
 ## Purpose and goals
 

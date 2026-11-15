@@ -25,7 +25,9 @@ describe("runtime creation admission", () => {
     expect((await create("https://example.com")).status).toBe("maintenance");
     control.observe({ revision: 1, creationMode: "accept" });
     expect(control.enterCreation()).toBeUndefined();
+    expect(control.configurationInitialized).toBe(false);
     control.setConnected(true);
+    expect(control.configurationInitialized).toBe(true);
     const release = control.enterCreation();
     expect(release).toBeTypeOf("function");
     release?.();
@@ -35,6 +37,7 @@ describe("runtime creation admission", () => {
     expect((await create("https://example.com")).status).toBe("maintenance");
     expect(insert).not.toHaveBeenCalled();
     expect(control.configurationLoaded).toBe(true);
+    expect(control.configurationInitialized).toBe(true);
   });
 
   test("drains the complete admitted creation including collision retries", async () => {

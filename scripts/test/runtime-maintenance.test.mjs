@@ -30,7 +30,7 @@ if (args.includes('--raw')) {
   pod.observations++;
   const stale = state.config.creationMode === 'reject' && (pod.terminating ? pod.observations < 4 : pod.name === 'second' && pod.observations < 3);
   const mode = stale ? 'accept' : state.config.creationMode;
-  write({ observedRevision: stale ? state.config.revision - 1 : state.config.revision, configurationCurrent: true, creationMode: mode, acceptingCreations: mode === 'accept', inflightCreations: 0, drained: mode === 'reject' });
+  write({ observedRevision: stale ? state.config.revision - 1 : state.config.revision, configurationCurrent: true, configurationApplied: !stale, activeDatabase: state.config.activeDatabase || 'source', database: { preparedDatabase: state.config.prepareDatabase || null, candidateReady: Boolean(state.config.prepareDatabase) }, creationMode: mode, acceptingCreations: mode === 'accept', inflightCreations: 0, drained: mode === 'reject' });
 } else if (args.includes('patch')) {
   const patch = JSON.parse(args[args.indexOf('-p') + 1]);
   if (!patch.some(p => p.op === 'test' && p.path === '/metadata/resourceVersion' && p.value === String(state.version))) fail();
@@ -67,10 +67,10 @@ async function fixture(t, concurrentChange = false) {
       ],
     }),
   );
-  const command = (action) =>
+  const command = (...args) =>
     promisify(execFile)(
       process.execPath,
-      [resolve("scripts/runtime-maintenance.mjs"), action],
+      [resolve("scripts/runtime-maintenance.mjs"), ...args],
       {
         env: {
           ...process.env,
@@ -125,4 +125,22 @@ test("concurrent configuration changes abort coordination without a compensating
     creationMode: "reject",
   });
   assert.equal((await state()).patchCalls, 1);
+});
+
+test("prepare, maintenance and reopening preserve the selected database configuration", async (t) => {
+  const { command, state } = await fixture(t);
+  await command("prepare", "ha");
+  await assert.rejects(command("switch", "ha"), (error) =>
+    error.stderr.includes("Begin maintenance"),
+  );
+  await command("begin");
+  assert.equal((await state()).config.prepareDatabase, "ha");
+  await command("switch", "ha");
+  await command("end");
+  assert.deepEqual((await state()).config, {
+    revision: 5,
+    creationMode: "accept",
+    prepareDatabase: null,
+    activeDatabase: "ha",
+  });
 });

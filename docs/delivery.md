@@ -259,3 +259,15 @@ The repository was moved to `/Users/dentuzhik/shortlink` during this increment.
 `origin` now points to `https://github.com/dentuzhik/shortlink`; no CI configuration
 was introduced. The local Gateway bridge's bind mount was refreshed to the new
 `deploy/kind/haproxy.cfg` path, and the UI and API passed checks afterward.
+
+## Preparatory Fastify runtime rollout
+
+After reviewing and committing [runtime pool control](database-pool-switching.md),
+the versioned Fastify deployment accepts `--runtime-control`. It creates the
+runtime ConfigMap only when absent, installs its restricted RBAC and includes
+the ServiceAccount/runtime environment in the same pod-template patch as the
+new immutable image. The selected commit must include runtime database support.
+The source remains selected and creation enabled during this preparatory rollout.
+Use the [steady-load rollout test](performance.md#test-a-versioned-fastify-rollout)
+to exercise the deployment at 1,000 redirects/s and ten creations/s. No such
+rollout of the new pool code has run yet.

@@ -10,6 +10,7 @@ export function createRedirectCache(
   findInPostgres: RedirectLookup,
   log: FastifyBaseLogger,
   observeRead?: (outcome: "hit" | "miss" | "unavailable") => void,
+  lookupGeneration = () => 0,
 ) {
   const redis = new Redis(redisUrl, {
     commandTimeout: 25,
@@ -44,7 +45,8 @@ export function createRedirectCache(
       return cachedUrl;
     }
 
-    const existingLookup = pendingLookups.get(code);
+    const pendingKey = `${lookupGeneration()}:${code}`;
+    const existingLookup = pendingLookups.get(pendingKey);
     if (existingLookup) {
       const targetUrl = await existingLookup;
       if (targetUrl !== undefined) {
@@ -68,12 +70,12 @@ export function createRedirectCache(
       }
       return targetUrl;
     })();
-    pendingLookups.set(code, lookup);
+    pendingLookups.set(pendingKey, lookup);
 
     try {
       return await lookup;
     } finally {
-      pendingLookups.delete(code);
+      pendingLookups.delete(pendingKey);
     }
   };
 

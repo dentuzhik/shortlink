@@ -3,8 +3,15 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import {
+  assertSourceConfiguration,
+  assertSourcePods,
+  fastifyRolloutPlan,
+} from "./lib/fastify-rollout.mjs";
 
 const execute = promisify(execFile);
+const plan = fastifyRolloutPlan(process.argv.slice(2));
+process.env.DOCKER_CONTEXT = "colima";
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const redirectRate = Number(process.env.RATE ?? 1000);
 const createRate = Number(process.env.CREATE_RATE ?? 10);
@@ -44,11 +51,35 @@ if (
   );
 }
 
+if (plan.action !== "restart") {
+  const maps = JSON.parse(await kube("get", "configmaps", "-o", "json")).items;
+  const control = maps.find((map) => map.metadata.name === "shortlink-runtime");
+  if (control)
+    assertSourceConfiguration(JSON.parse(control.data["control.json"]));
+  const previous =
+    deployment.spec.template.metadata.annotations?.[
+      "shortlink.dev/git-revision"
+    ];
+  if (previous === plan.revision)
+    throw new Error(
+      "Select a different image revision for a versioned rollout test",
+    );
+  if (plan.action === "deploy-local") {
+    // Build before starting load; the deployment command will reuse the SHA image.
+    const prepared = await execute(
+      "node",
+      ["scripts/release-redirect.mjs", "build", plan.revision],
+      { timeout: 300000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    process.stdout.write(prepared.stdout);
+  }
+}
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
 const runDir = resolve(".kind/rolling-restart", stamp);
 await mkdir(runDir, { recursive: true });
 const report = {
   createdAt: Date.now(),
+  operation: plan,
   runDir,
   rate: redirectRate,
   createRate,
@@ -176,6 +207,8 @@ const command = nativeRunner ?? "docker";
 const args = nativeRunner
   ? [
       "run",
+      "--log-format",
+      "raw",
       "--no-color",
       "--quiet",
       "--summary-export",
@@ -205,6 +238,8 @@ const args = nativeRunner
       `${runDir}:/results`,
       "grafana/k6:2.3.0",
       "run",
+      "--log-format",
+      "raw",
       "--no-color",
       "--quiet",
       "--summary-export",
@@ -220,32 +255,42 @@ const args = nativeRunner
 report.runner = nativeRunner ? "native" : "docker (shares the Colima VM)";
 console.log(`Artifacts: ${runDir}\nRunner: ${report.runner}`);
 console.log(
-  `${redirectRate} redirects/s + ${createRate} creations/s for 90s; requesting a Fastify rolling restart after 20s.`,
+  `${redirectRate} redirects/s + ${createRate} creations/s for 90s; requesting Fastify ${plan.action} after 20s.`,
 );
 const child = spawn(command, args, {
   env: { ...process.env, K6_NO_USAGE_REPORT: "true" },
 });
 const exited = new Promise((done, reject) => {
   child.once("error", reject);
-  child.once("exit", (code, signal) => done({ code, signal }));
+  child.once("close", (code, signal) => done({ code, signal }));
 });
 let ready;
 const started = new Promise((done) => {
   ready = done;
 });
-let buffered = "";
+const buffers = new Map();
+const acknowledged = [];
+let acknowledgementError;
 let warningLines = 0;
 for (const stream of [child.stdout, child.stderr]) {
   stream.on("data", (chunk) => {
     log.write(chunk);
-    buffered += chunk;
+    const buffered = (buffers.get(stream) ?? "") + chunk;
     const lines = buffered.split("\n");
-    buffered = lines.pop();
+    buffers.set(stream, lines.pop());
     for (const line of lines) {
       const marker = line.match(/ROLLING_RESTART_READY (\d+)/);
       if (marker && !report.startedAt) {
         report.startedAt = Number(marker[1]);
         ready();
+      }
+      if (line.startsWith("CREATION_ACK ")) {
+        try {
+          acknowledged.push(JSON.parse(line.slice("CREATION_ACK ".length)));
+        } catch {
+          acknowledgementError = true;
+        }
+        continue;
       }
       const warning =
         line.includes("Request Failed") ||
@@ -281,8 +326,23 @@ try {
   if (interrupted || child.exitCode !== null || child.signalCode !== null)
     throw new Error("k6 stopped before the scheduled restart");
   report.restartRequestedAt = Date.now();
-  console.log("Requesting rolling restart now; k6 traffic continues.");
-  await kube("rollout", "restart", "deployment/redirect-service");
+  console.log(`Requesting Fastify ${plan.action}; k6 traffic continues.`);
+  if (plan.action === "restart")
+    await kube("rollout", "restart", "deployment/redirect-service");
+  else {
+    const released = await execute(
+      "node",
+      [
+        "scripts/release-redirect.mjs",
+        plan.action,
+        plan.revision,
+        "--runtime-control",
+      ],
+      { timeout: 150000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    await writeFile(`${runDir}/release.log`, released.stdout);
+    process.stdout.write(released.stdout);
+  }
   console.log(
     await kube(
       "rollout",
@@ -302,12 +362,75 @@ try {
   ) {
     throw new Error("Rollout did not replace both original pods");
   }
+  if (plan.action !== "restart") {
+    const result = JSON.parse(
+      (
+        await execute("node", ["scripts/runtime-maintenance.mjs", "status"], {
+          timeout: 15000,
+        })
+      ).stdout,
+    );
+    assertSourceConfiguration(result.desired);
+    report.runtimeStatus = result.pods.filter((pod) =>
+      report.replacementPods.includes(pod.pod),
+    );
+    assertSourcePods(report.runtimeStatus);
+  }
   if (report.rolloutCompletedAt >= report.startedAt + 60_000) {
     throw new Error("Rollout exceeded the 40-second restart window");
   }
   report.k6Exit = await exited;
   if (report.k6Exit.code !== 0)
     throw new Error("k6 failed; inspect thresholds");
+  if (acknowledgementError)
+    throw new Error("Creation acknowledgement journal was malformed");
+  const summary = JSON.parse(await readFile(`${runDir}/summary.json`, "utf8"));
+  const completedCreations =
+    summary.metrics["iterations{scenario:creations}"]?.count ?? 0;
+  if (acknowledged.length !== completedCreations)
+    throw new Error(
+      "Creation acknowledgement count differs from completed iterations",
+    );
+  if (acknowledged.length) {
+    const expected = JSON.stringify(acknowledged).replaceAll("'", "''");
+    const sql = `SELECT count(*)::int FROM jsonb_to_recordset('${expected}'::jsonb) AS e(code text, "targetUrl" text) JOIN public.links l ON l.code=e.code AND l.target_url=e."targetUrl";`;
+    const stored = await new Promise((resolve, reject) => {
+      const check = spawn("kubectl", [
+        ...kubeArgs,
+        "exec",
+        "-i",
+        "deployment/postgres",
+        "--",
+        "psql",
+        "-X",
+        "-qAt",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        "shortener",
+        "-d",
+        "shortener",
+      ]);
+      let output = "";
+      check.stderr.resume();
+      check.stdin.on("error", reject);
+      check.stdout.on("data", (chunk) => {
+        output += chunk;
+      });
+      check.once("error", reject);
+      check.once("close", (code) =>
+        code === 0
+          ? resolve(Number(output.trim()))
+          : reject(new Error("Source cohort verification failed")),
+      );
+      check.stdin.end(`SET statement_timeout=5000; ${sql}`);
+    });
+    report.storedAcknowledgedCreations = stored;
+    if (stored !== acknowledged.length)
+      throw new Error(
+        "An acknowledged creation is missing or has a different destination in source Postgres",
+      );
+  }
   report.passed = true;
 } catch (error) {
   report.passed = false;
@@ -331,6 +454,12 @@ try {
   timeline.end();
   for (const follower of followers) follower.kill("SIGTERM");
   log.end();
+  report.acknowledgedCreationCount = acknowledged.length;
+  report.acknowledgementJournalError = Boolean(acknowledgementError);
+  await writeFile(
+    `${runDir}/acknowledged-creations.json`,
+    `${JSON.stringify(acknowledged, null, 2)}\n`,
+  );
   report.finishedAt = Date.now();
   report.warningLines = warningLines;
   report.minSampledAvailable = Math.min(

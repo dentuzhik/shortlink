@@ -8,11 +8,12 @@ type PoolState = Pick<Pool, "totalCount" | "idleCount" | "waitingCount">;
 
 export function registerMetrics(
   app: FastifyInstance,
-  pool: PoolState,
+  pool: PoolState | (() => PoolState),
   revision = "development",
 ) {
   // Each app owns a registry, just as it owns its database pool.
   const registry = new Registry();
+  const currentPool = () => (typeof pool === "function" ? pool() : pool);
   new Gauge({
     name: "shortlink_build_info",
     help: "Git revision baked into this Fastify image; development for unversioned builds.",
@@ -74,8 +75,9 @@ export function registerMetrics(
     labelNames: ["state"] as const,
     registers: [registry],
     collect() {
-      this.set({ state: "in_use" }, pool.totalCount - pool.idleCount);
-      this.set({ state: "idle" }, pool.idleCount);
+      const active = currentPool();
+      this.set({ state: "in_use" }, active.totalCount - active.idleCount);
+      this.set({ state: "idle" }, active.idleCount);
     },
   });
   new Gauge({
@@ -83,7 +85,7 @@ export function registerMetrics(
     help: "Checkouts currently waiting in the pg pool queue.",
     registers: [registry],
     collect() {
-      this.set(pool.waitingCount);
+      this.set(currentPool().waitingCount);
     },
   });
 

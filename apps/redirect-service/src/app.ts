@@ -1,14 +1,16 @@
-import { createLinkStore } from "@url-shortener/db/links";
 import Fastify from "fastify";
-import { createDatabasePool } from "./database.js";
+import { DatabasePools, type DatabaseTarget } from "./database-pools.js";
 import { registerGraphQL } from "./graphql.js";
 import { createLinkCreator } from "./link-creation.js";
 import { registerLinkRoutes } from "./links.js";
 import { registerMetrics } from "./metrics.js";
 import { registerRedirectRoute } from "./redirect.js";
-import { createRedirectCheckout } from "./redirect-admission.js";
 import { createRedirectCache } from "./redirect-cache.js";
-import { RuntimeMaintenance } from "./runtime-maintenance.js";
+import {
+  type DatabaseName,
+  type MaintenanceConfig,
+  RuntimeMaintenance,
+} from "./runtime-maintenance.js";
 
 export function buildApp(
   databaseUrl: string,
@@ -21,25 +23,20 @@ export function buildApp(
     redirectCheckoutTimeoutMs = 50,
     revision = "development",
     maintenance = new RuntimeMaintenance(true),
+    databaseTargets = {} as Partial<Record<DatabaseName, DatabaseTarget>>,
   } = {},
 ) {
   const app = Fastify({
     logger: true,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false } },
   });
-  const pool = createDatabasePool(databaseUrl, poolMax);
-  const metrics = registerMetrics(app, pool, revision);
-  const metricsServer = metrics.server;
-  app.decorate("metricsServer", metricsServer);
-  metricsServer.get("/internal/maintenance", async (_request, reply) => {
-    reply.header("Cache-Control", "no-store");
-    return maintenance.status();
-  });
-  const checkoutRedirect = createRedirectCheckout(
-    pool,
-    redirectMaxWaiters,
-    redirectCheckoutTimeoutMs,
-    (observation) => {
+  const databases = new DatabasePools(databaseUrl, maintenance, {
+    poolMax,
+    maxWaiters: redirectMaxWaiters,
+    checkoutTimeoutMs: redirectCheckoutTimeoutMs,
+    targets: databaseTargets,
+    onPoolError: () => app.log.warn("Postgres pool error"),
+    observeCheckout: (observation) => {
       metrics.observeRedirectCheckout(observation);
       if (
         observation.outcome === "queue_full" ||
@@ -56,26 +53,45 @@ export function buildApp(
         );
       }
     },
+  });
+  const metrics = registerMetrics(app, () => databases.poolState(), revision);
+  const metricsServer = metrics.server;
+  app.decorate("metricsServer", metricsServer);
+  app.decorate("applyRuntimeConfig", (config: MaintenanceConfig) =>
+    databases.configure(config),
   );
-  const linkStore = createLinkStore(pool, checkoutRedirect);
+  metricsServer.get("/internal/maintenance", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const control = maintenance.status();
+    const database = databases.status();
+    return {
+      ...control,
+      database,
+      configurationApplied:
+        control.configurationCurrent &&
+        database.appliedRevision === control.observedRevision &&
+        database.error === null &&
+        (!control.prepareDatabase ||
+          control.prepareDatabase === control.activeDatabase ||
+          (database.preparedDatabase === control.prepareDatabase &&
+            database.candidateReady)),
+    };
+  });
+  const linkStore = databases.store;
   const cache = redisUrl
     ? createRedirectCache(
         redisUrl,
         linkStore.findTargetUrl,
         app.log,
         metrics.observeRedisRead,
+        () => databases.cacheGeneration(),
       )
     : undefined;
-
-  pool.on("error", (error) => {
-    // Pool errors can include the database client. Log only the message.
-    app.log.warn({ reason: error.message }, "Idle Postgres connection failed");
-  });
 
   app.addHook("onClose", async () => {
     await metricsServer.close();
     cache?.close();
-    await pool.end();
+    await databases.close();
   });
 
   app.get("/healthz", async () => {
@@ -84,11 +100,11 @@ export function buildApp(
 
   app.get("/readyz", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
-    if (!maintenance.configurationLoaded) {
+    if (!maintenance.configurationInitialized) {
       return reply.code(503).send({ status: "not ready" });
     }
     try {
-      await pool.query("SELECT 1");
+      await databases.probe();
       return { status: "ready" };
     } catch (error) {
       const reason = error instanceof Error ? error.message : "Unknown error";
