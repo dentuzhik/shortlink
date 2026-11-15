@@ -5,7 +5,10 @@
 This is a recoverability checkpoint before resizing or migrating infrastructure.
 Export the existing application database to the Mac, restore into a disposable
 Postgres instance, and verify both its contents and application behavior. The
-[November 14 results](experiments/backup-restore.md) record two successful runs.
+[November 14 results](experiments/backup-restore.md) record two successful source
+runs. The separate [HA database procedure](database-recovery-ha.md) and
+[November 15 results](experiments/ha-backup-restore.md) now qualify a logical
+restore from the new primary while Fastify remains on source.
 
 ## Run the rehearsal
 

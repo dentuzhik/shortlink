@@ -17,26 +17,42 @@ import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import {
+  appGet,
+  dbGet,
+  run as labRun,
+  sourceState,
+} from "./lib/db-lab-connectivity.mjs";
+import {
+  assertNoReplicationEntries,
+  restoreMode,
+  sequenceInventorySql,
+  sequenceRepair,
+} from "./lib/db-restore.mjs";
+import { assertSourceStatus } from "./lib/ha-target.mjs";
+import { state as replicationState } from "./lib/live-replication.mjs";
 
 // Explicit targets: this exercise must never infer a destination from DATABASE_URL.
 const root = fileURLToPath(new URL("../", import.meta.url));
 process.chdir(root);
 process.umask(0o077);
+const mode = restoreMode(process.argv.slice(2));
+const ha = mode === "ha";
 const kube = [
   "--kubeconfig",
-  ".kind/kubeconfig",
+  ha ? ".kind/db-cluster/kubeconfig" : ".kind/kubeconfig",
   "--context",
-  "kind-shortlink",
+  ha ? "kind-shortlink-db" : "kind-shortlink",
   "-n",
-  "shortlink",
+  ha ? "database-lab" : "shortlink",
 ];
 const docker = ["--context", "colima"];
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
-const directory = resolve(".kind/backups", stamp);
+const directory = resolve(ha ? ".kind/ha-backups" : ".kind/backups", stamp);
 const container = `shortlink-restore-${stamp.toLowerCase()}`;
 const volume = `${container}-data`;
 const archive = resolve(directory, "shortener.dump");
-const label = "shortlink.exercise=db-restore";
+const label = `shortlink.exercise=${ha ? "ha-db-restore" : "db-restore"}`;
 const runLabel = `shortlink.rehearsal=${stamp}`;
 const children = new Set();
 let interrupted = false;
@@ -56,6 +72,7 @@ const report = {
   startedAt: new Date().toISOString(),
   directory,
   checks: {},
+  mode,
 };
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -141,10 +158,13 @@ function sourceArgs(tool, args = []) {
     "exec",
     "-i",
     sourcePod,
+    ...(ha ? ["-c", "postgres"] : []),
     "--",
     "sh",
     "-c",
-    'tool="$1"; shift; exec "$tool" "$@" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
+    ha
+      ? 'tool="$1"; shift; export PGOPTIONS="-c default_transaction_read_only=on"; exec "$tool" "$@" --username=postgres --dbname=shortener'
+      : 'tool="$1"; shift; exec "$tool" "$@" --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
     "restore-rehearsal",
     tool,
     ...args,
@@ -223,6 +243,17 @@ async function checkSource() {
       result.responses.push({ host, path, status: null });
     }
   }
+  if (ha) {
+    try {
+      result.hostMemoryPressure = Number(
+        (
+          await run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"])
+        ).trim(),
+      );
+    } catch {
+      result.hostMemoryPressure = null;
+    }
+  }
   observations.push(result);
   return result.responses.every((response) => response.status === 200);
 }
@@ -294,6 +325,186 @@ async function sequenceState() {
     safe: next > BigInt(row.max_id),
   };
 }
+const sequenceSql = (inventory) => {
+  const literal = (value) => `'${String(value).replaceAll("'", "''")}'`;
+  ensure(inventory.length > 0, "Expected owned identity sequences");
+  return `SELECT json_agg(x ORDER BY schema,name) FROM (${inventory
+    .map(
+      (seq) =>
+        `SELECT ${literal(seq.schema)}::text AS schema,${literal(seq.name)}::text AS name,${literal(seq.increment)}::text AS increment,
+      (SELECT last_value::text FROM ${quote(seq.schema)}.${quote(seq.name)}) AS last_value,
+      (SELECT is_called FROM ${quote(seq.schema)}.${quote(seq.name)}) AS is_called,
+      (SELECT coalesce(max(${quote(seq.column_name)}),0)::text FROM ${quote(seq.table_schema)}.${quote(seq.table_name)}) AS max_id`,
+    )
+    .join(" UNION ALL ")})x;`;
+};
+async function liveHaState() {
+  const runtime = JSON.parse(
+    await labRun("node", ["scripts/runtime-maintenance.mjs", "status"]),
+  );
+  assertSourceStatus(runtime, true);
+  const cluster = await dbGet(["get", "cluster", "shortlink-lab"]);
+  ensure(
+    cluster.status.readyInstances === 3,
+    "Expected three healthy HA instances",
+  );
+  const pod = await dbGet(["get", "pod", cluster.status.currentPrimary]);
+  const sourcePostgres = await appGet(["get", "deployment", "postgres"]);
+  const control = await appGet(["get", "configmap", "shortlink-runtime"]);
+  return {
+    application: await sourceState(),
+    runtime,
+    controlData: control.data,
+    clusterSpecHash: hash(JSON.stringify(cluster.spec)),
+    sourcePostgresSpecHash: hash(JSON.stringify(sourcePostgres.spec)),
+    primary: pod.metadata.name,
+    primaryUid: pod.metadata.uid,
+    primaryImage: cluster.spec.imageName,
+    primaryNode: pod.spec.nodeName,
+  };
+}
+async function checkHaInvariants() {
+  report.haAfter = await liveHaState();
+  assert.deepEqual(
+    report.haAfter.controlData,
+    report.haBefore.controlData,
+    "Runtime control changed during recovery qualification",
+  );
+  for (const key of [
+    "clusterSpecHash",
+    "sourcePostgresSpecHash",
+    "primary",
+    "primaryUid",
+  ])
+    assert.equal(
+      report.haAfter[key],
+      report.haBefore[key],
+      `Live ${key} changed during rehearsal`,
+    );
+  assert.equal(
+    report.haAfter.application.deploymentSpecHash,
+    report.haBefore.application.deploymentSpecHash,
+  );
+  assert.deepEqual(
+    report.haAfter.runtime.pods.map((pod) => pod.uid).sort(),
+    report.haBefore.runtime.pods.map((pod) => pod.uid).sort(),
+  );
+  report.haSequenceAfter = JSON.parse(
+    await sourceSql(sequenceSql(report.sequenceInventory)),
+  );
+  // Concurrent logical apply may increase table maxima, but must not advance sequences.
+  const stateOnly = (states) =>
+    states.map(({ max_id: _maximum, ...state }) => state);
+  assert.deepEqual(
+    stateOnly(report.haSequenceAfter),
+    stateOnly(report.haSequenceBefore),
+  );
+  report.replicationAfter = await replicationState();
+  ensure(
+    report.replicationAfter.source.slots.some(
+      (slot) => slot.slot_name === "shortlink_migration_sub" && slot.active,
+    ) &&
+      report.replicationAfter.destination.workers.some(
+        (worker) => worker.worker_type === "apply" && worker.pid,
+      ),
+    "Live migration stream is not active",
+  );
+  report.checks.liveConfigurationAndSequencesUnchanged = true;
+}
+async function createHaClone(password) {
+  ensure(
+    (
+      await dk([
+        "volume",
+        "inspect",
+        "--format",
+        '{{index .Labels "shortlink.rehearsal"}}',
+        volume,
+      ])
+    ).trim() === stamp,
+    "Refusing to initialize a volume not owned by this rehearsal",
+  );
+  // Only the newly labelled volume is writable by this initialization container.
+  await dk([
+    "run",
+    "--rm",
+    "--network=none",
+    "--memory=128m",
+    "--cpus=1",
+    "--user=0:0",
+    "--entrypoint=/bin/sh",
+    "--mount",
+    `type=volume,source=${volume},target=/restore`,
+    report.postgresImage,
+    "-c",
+    "chown 26:26 /restore && chmod 700 /restore",
+  ]);
+  containerCreated = true;
+  await dk([
+    "run",
+    "--detach",
+    "--name",
+    container,
+    "--label",
+    label,
+    "--label",
+    runLabel,
+    "--memory=512m",
+    "--cpus=1",
+    "--user=26:26",
+    "--publish",
+    "127.0.0.1::5432",
+    "--mount",
+    `type=volume,source=${volume},target=/restore`,
+    "--env",
+    "PGDATA=/restore/pgdata",
+    "--entrypoint=/bin/sh",
+    report.postgresImage,
+    "-c",
+    await readFile(new URL("./restore-ha-clone.sh", import.meta.url), "utf8"),
+  ]);
+  let ready = false;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    try {
+      await dk([
+        "exec",
+        container,
+        "pg_isready",
+        "-h",
+        "127.0.0.1",
+        "-U",
+        "restore_admin",
+        "-d",
+        "postgres",
+      ]);
+      ready = true;
+      break;
+    } catch {
+      await delay(1000);
+    }
+  }
+  ensure(ready, "HA recovery clone did not become ready");
+  // The password is freshly generated for this clone, never copied from live HA.
+  await dk(
+    [
+      "exec",
+      "-i",
+      container,
+      "psql",
+      "-h",
+      "/tmp",
+      "-U",
+      "restore_admin",
+      "-d",
+      "postgres",
+      ...psqlOptions,
+    ],
+    {
+      input: `CREATE ROLE shortlink_lab LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '${password}';
+      CREATE DATABASE restore_test OWNER shortlink_lab TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE 'en_US.utf8' LC_CTYPE 'en_US.utf8';`,
+    },
+  );
+}
 async function verifyApplication() {
   const requireApp = createRequire(
     new URL("../apps/redirect-service/package.json", import.meta.url),
@@ -304,7 +515,7 @@ async function verifyApplication() {
   ensure(/^127\.0\.0\.1:\d+$/.test(port), "Restore port must be loopback-only");
   const password = process.env.SHORTLINK_RESTORE_PASSWORD;
   const url = new URL(`postgresql://${port}/restore_test`);
-  url.username = "restore_user";
+  url.username = ha ? "shortlink_lab" : "restore_user";
   url.password = password;
   client = new Client({ connectionString: url.href });
   await client.connect();
@@ -318,6 +529,77 @@ async function verifyApplication() {
     "Restored table contents differ from the source snapshot",
   );
   report.checks.allTableContents = true;
+  if (ha) {
+    const {
+      rows: [identity],
+    } = await client.query(
+      "SELECT current_user AS role,(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser",
+    );
+    ensure(
+      identity.role === "shortlink_lab" && !identity.superuser,
+      "Restored application role must be a nonsuperuser",
+    );
+    const {
+      rows: [objects],
+    } = await client.query(
+      "SELECT (SELECT count(*)::int FROM pg_subscription) AS subscriptions,(SELECT count(*)::int FROM pg_publication) AS publications,(SELECT count(*)::int FROM pg_replication_slots) AS slots",
+    );
+    ensure(
+      Object.values(objects).every((count) => count === 0),
+      "The clone must have no replication objects",
+    );
+    const {
+      rows: [locale],
+    } = await client.query(
+      "SELECT pg_encoding_to_char(encoding) AS encoding,datlocprovider,datcollate,datctype,datcollversion FROM pg_database WHERE datname=current_database()",
+    );
+    assert.deepEqual(
+      locale,
+      report.locale,
+      "Restore database locale differs from HA",
+    );
+    const {
+      rows: [raw],
+    } = await client.query(sequenceSql(report.sequenceInventory));
+    report.cloneSequencesAsRestored = raw.json_agg;
+    const sourceValues = report.haSequenceBefore.map(
+      ({ max_id: _max, ...value }) => value,
+    );
+    assert.deepEqual(
+      raw.json_agg.map(({ max_id: _max, ...value }) => value),
+      sourceValues,
+      "Restored sequence values differ from the HA backup",
+    );
+    report.cloneSequenceRepairs = [];
+    for (const sequence of raw.json_agg) {
+      const correction = sequenceRepair(sequence);
+      if (correction) {
+        await client.query(
+          "SELECT setval($1::regclass,$2::bigint,$3::boolean)",
+          [
+            `${quote(sequence.schema)}.${quote(sequence.name)}`,
+            correction.last_value,
+            correction.is_called,
+          ],
+        );
+        report.cloneSequenceRepairs.push({
+          schema: sequence.schema,
+          name: sequence.name,
+          ...correction,
+        });
+      }
+    }
+    const {
+      rows: [corrected],
+    } = await client.query(sequenceSql(report.sequenceInventory));
+    ensure(
+      corrected.json_agg.every((sequence) => !sequenceRepair(sequence)),
+      "A restored identity sequence remains unsafe",
+    );
+    report.cloneSequencesAfterCorrection = corrected.json_agg;
+    report.checks.isolatedRestoreAndRole = true;
+    report.checks.cloneOnlySequenceCorrection = true;
+  }
   const state = await sequenceState();
   ensure(state.safe, "Restored identity sequence could reuse an existing ID");
   report.sequenceBeforeTest = state;
@@ -431,6 +713,8 @@ async function verifyApplication() {
   );
   report.checks.restAndGraphqlCreation = true;
   report.checks.identityAdvances = true;
+  report.restoredLinkCountAfterTest = count.count;
+  report.createdIds = written.map((row) => row.id);
   try {
     await client.query(
       "INSERT INTO public.links(code,target_url) VALUES($1,$2)",
@@ -461,61 +745,109 @@ await mkdir(directory, { recursive: true, mode: 0o700 });
 await chmod(directory, 0o700);
 try {
   report.sourceCommit = (await run("git", ["rev-parse", "HEAD"])).trim();
-  const pods = JSON.parse(
-    await run("kubectl", [
-      ...kube,
-      "get",
-      "pods",
-      "-l",
-      "app=postgres",
-      "-o",
-      "json",
-    ]),
-  ).items;
-  ensure(
-    pods.length === 1 && pods[0].status.containerStatuses?.[0]?.ready,
-    "Expected one ready source Postgres pod",
-  );
-  sourcePod = pods[0].metadata.name;
-  report.source = {
-    context: "kind-shortlink",
-    namespace: "shortlink",
-    pod: sourcePod,
-    uid: pods[0].metadata.uid,
-  };
-  const digest = pods[0].status.containerStatuses[0].imageID;
-  ensure(
-    /^sha256:[a-f0-9]{64}$/.test(digest),
-    "Unexpected source image identity",
-  );
-  report.source.runtimeImageID = digest;
-  const tag = pods[0].spec.containers[0].image;
-  ensure(
-    /^postgres:\d+\.\d+$/.test(tag),
-    "Expected the official source Postgres image",
-  );
-  const reference = `docker.io/library/${tag}`;
-  // CRI imageID can be a configuration hash, not a pullable registry manifest.
-  // Resolve the actual manifest from the source kind node's containerd metadata.
-  const images = await dk([
-    "exec",
-    pods[0].spec.nodeName,
-    "ctr",
-    "--namespace",
-    "k8s.io",
-    "images",
-    "list",
-    `name==${reference}`,
-  ]);
-  const entry = images
-    .split("\n")
-    .find((line) => line.startsWith(`${reference} `));
-  const manifest = entry?.trim().split(/\s+/)[2];
-  ensure(
-    /^sha256:[a-f0-9]{64}$/.test(manifest ?? ""),
-    "Could not resolve the source registry manifest",
-  );
-  report.postgresImage = `docker.io/library/postgres@${manifest}`;
+  if (ha) {
+    ensure(
+      (
+        await run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"])
+      ).trim() === "1",
+      "Host memory pressure must be normal before starting the rehearsal",
+    );
+    report.haBefore = await liveHaState();
+    sourcePod = report.haBefore.primary;
+    report.source = {
+      context: "kind-shortlink-db",
+      namespace: "database-lab",
+      pod: sourcePod,
+      uid: report.haBefore.primaryUid,
+      database: "shortener",
+    };
+    report.postgresImage = report.haBefore.primaryImage;
+    ensure(
+      /^ghcr\.io\/cloudnative-pg\/postgresql:18\.7-system-trixie@sha256:[a-f0-9]{64}$/.test(
+        report.postgresImage,
+      ),
+      "Expected the reviewed HA image",
+    );
+    report.locale = JSON.parse(
+      await sourceSql(
+        "SELECT row_to_json(x) FROM (SELECT pg_encoding_to_char(encoding) AS encoding,datlocprovider,datcollate,datctype,datcollversion FROM pg_database WHERE datname=current_database())x;",
+      ),
+    );
+    assert.deepEqual(report.locale, {
+      encoding: "UTF8",
+      datlocprovider: "c",
+      datcollate: "en_US.utf8",
+      datctype: "en_US.utf8",
+      datcollversion: "2.41",
+    });
+    report.sequenceInventory = JSON.parse(
+      await sourceSql(sequenceInventorySql),
+    );
+    ensure(
+      report.sequenceInventory.length === 2,
+      "Expected the reviewed two identity sequences",
+    );
+    report.haSequenceBefore = JSON.parse(
+      await sourceSql(sequenceSql(report.sequenceInventory)),
+    );
+    report.replicationBefore = await replicationState();
+  } else {
+    const pods = JSON.parse(
+      await run("kubectl", [
+        ...kube,
+        "get",
+        "pods",
+        "-l",
+        "app=postgres",
+        "-o",
+        "json",
+      ]),
+    ).items;
+    ensure(
+      pods.length === 1 && pods[0].status.containerStatuses?.[0]?.ready,
+      "Expected one ready source Postgres pod",
+    );
+    sourcePod = pods[0].metadata.name;
+    report.source = {
+      context: "kind-shortlink",
+      namespace: "shortlink",
+      pod: sourcePod,
+      uid: pods[0].metadata.uid,
+    };
+    const digest = pods[0].status.containerStatuses[0].imageID;
+    ensure(
+      /^sha256:[a-f0-9]{64}$/.test(digest),
+      "Unexpected source image identity",
+    );
+    report.source.runtimeImageID = digest;
+    const tag = pods[0].spec.containers[0].image;
+    ensure(
+      /^postgres:\d+\.\d+$/.test(tag),
+      "Expected the official source Postgres image",
+    );
+    const reference = `docker.io/library/${tag}`;
+    // CRI imageID can be a configuration hash, not a pullable registry manifest.
+    // Resolve the actual manifest from the source kind node's containerd metadata.
+    const images = await dk([
+      "exec",
+      pods[0].spec.nodeName,
+      "ctr",
+      "--namespace",
+      "k8s.io",
+      "images",
+      "list",
+      `name==${reference}`,
+    ]);
+    const entry = images
+      .split("\n")
+      .find((line) => line.startsWith(`${reference} `));
+    const manifest = entry?.trim().split(/\s+/)[2];
+    ensure(
+      /^sha256:[a-f0-9]{64}$/.test(manifest ?? ""),
+      "Could not resolve the source registry manifest",
+    );
+    report.postgresImage = `docker.io/library/postgres@${manifest}`;
+  }
   // Pull/resolve the clone image before opening a source transaction.
   await dk(["pull", report.postgresImage]);
   ensure(
@@ -546,6 +878,7 @@ try {
     "--no-owner",
     "--no-privileges",
     "--quote-all-identifiers",
+    ...(ha ? ["--no-subscriptions", "--no-publications"] : []),
     `--snapshot=${snapshot}`,
     "--lock-wait-timeout=5s",
   ];
@@ -555,6 +888,7 @@ try {
   });
   report.sourceSchemaSha256 = hash(canonicalSchema(sourceSchema));
   const backupStarted = performance.now();
+  report.backupStartedAt = new Date().toISOString();
   const partial = `${archive}.partial`;
   await run(
     "kubectl",
@@ -562,6 +896,7 @@ try {
       "--format=custom",
       "--no-owner",
       "--no-privileges",
+      ...(ha ? ["--no-subscriptions", "--no-publications"] : []),
       `--snapshot=${snapshot}`,
       "--lock-wait-timeout=5s",
     ]),
@@ -586,6 +921,15 @@ try {
     archive: report.archive,
   });
   await releaseSnapshot();
+  report.snapshotReleasedAt = new Date().toISOString();
+  const recoveryStarted = performance.now();
+  if (ha)
+    ensure(
+      (
+        await run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"])
+      ).trim() === "1",
+      "Host memory pressure must remain normal before starting the clone",
+    );
 
   console.log(
     "Restoring into a fresh, memory-limited container; all test writes target the clone.",
@@ -595,56 +939,70 @@ try {
   await dk(["volume", "create", "--label", label, "--label", runLabel, volume]);
   const password = randomBytes(24).toString("hex");
   process.env.SHORTLINK_RESTORE_PASSWORD = password;
-  containerCreated = true;
-  await dk(
-    [
-      "run",
-      "--detach",
-      "--name",
-      container,
-      "--label",
-      label,
-      "--label",
-      runLabel,
-      "--memory=512m",
-      "--cpus=1",
-      "--publish",
-      "127.0.0.1::5432",
-      "--mount",
-      `type=volume,source=${volume},target=/var/lib/postgresql`,
-      "--env",
-      "POSTGRES_USER=restore_user",
-      "--env",
-      "POSTGRES_DB=restore_test",
-      "--env",
-      "POSTGRES_PASSWORD",
-      report.postgresImage,
-    ],
-    { env: { ...process.env, POSTGRES_PASSWORD: password } },
-  );
-  let ready = false;
-  for (let i = 0; i < 60; i++) {
-    ensure(!interrupted, "Rehearsal interrupted");
-    // initdb briefly starts a socket-only server: wait for the final TCP listener.
-    try {
-      await dk([
-        "exec",
+  if (ha) await createHaClone(password);
+  else {
+    containerCreated = true;
+    await dk(
+      [
+        "run",
+        "--detach",
+        "--name",
         container,
-        "pg_isready",
-        "-h",
-        "127.0.0.1",
-        "-U",
-        "restore_user",
-        "-d",
-        "restore_test",
-      ]);
-      ready = true;
-      break;
-    } catch {
-      await delay(1000);
+        "--label",
+        label,
+        "--label",
+        runLabel,
+        "--memory=512m",
+        "--cpus=1",
+        "--publish",
+        "127.0.0.1::5432",
+        "--mount",
+        `type=volume,source=${volume},target=/var/lib/postgresql`,
+        "--env",
+        "POSTGRES_USER=restore_user",
+        "--env",
+        "POSTGRES_DB=restore_test",
+        "--env",
+        "POSTGRES_PASSWORD",
+        report.postgresImage,
+      ],
+      { env: { ...process.env, POSTGRES_PASSWORD: password } },
+    );
+    let ready = false;
+    for (let i = 0; i < 60; i++) {
+      ensure(!interrupted, "Rehearsal interrupted");
+      // initdb briefly starts a socket-only server: wait for the final TCP listener.
+      try {
+        await dk([
+          "exec",
+          container,
+          "pg_isready",
+          "-h",
+          "127.0.0.1",
+          "-U",
+          "restore_user",
+          "-d",
+          "restore_test",
+        ]);
+        ready = true;
+        break;
+      } catch {
+        await delay(1000);
+      }
     }
+    ensure(ready, "Restore container did not become ready");
   }
-  ensure(ready, "Restore container did not become ready");
+  if (ha) {
+    const toc = await dk(["exec", "-i", container, "pg_restore", "--list"], {
+      input: createReadStream(archive),
+    });
+    assertNoReplicationEntries(toc);
+    await writeFile(resolve(directory, "archive-toc.txt"), toc, {
+      mode: 0o600,
+    });
+    report.checks.archiveExcludesReplication = true;
+  }
+  report.cloneProvisionMs = performance.now() - recoveryStarted;
   const startedRestore = performance.now();
   await dk(
     [
@@ -656,7 +1014,9 @@ try {
       "--single-transaction",
       "--no-owner",
       "--no-privileges",
-      "--username=restore_user",
+      ...(ha
+        ? ["--host=/tmp", "--username=restore_admin", "--role=shortlink_lab"]
+        : ["--username=restore_user"]),
       "--dbname=restore_test",
     ],
     { input: createReadStream(archive) },
@@ -670,7 +1030,14 @@ try {
     "--no-owner",
     "--no-privileges",
     "--quote-all-identifiers",
-    "--username=restore_user",
+    ...(ha
+      ? [
+          "--host=/tmp",
+          "--username=restore_admin",
+          "--no-subscriptions",
+          "--no-publications",
+        ]
+      : ["--username=restore_user"]),
     "--dbname=restore_test",
   ]);
   await writeFile(resolve(directory, "restored-schema.sql"), restoredSchema, {
@@ -683,6 +1050,8 @@ try {
   );
   report.checks.schema = true;
   await verifyApplication();
+  report.recoveryThroughApplicationMs = performance.now() - recoveryStarted;
+  if (ha) await checkHaInvariants();
   ensure(
     await checkSource(),
     "Existing service was unhealthy after verification",

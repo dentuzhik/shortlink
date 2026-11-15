@@ -47,7 +47,10 @@ validated by both Fastify replicas; source remains selected. Its full rollout
 load trial failed client thresholds, including baseline errors, and is not a
 clean load qualification. Database fencing, destination recovery qualification
 and safe handling of ambiguous write outcomes remain separate increments; the
-source remains authoritative.
+source remains authoritative. The HA tier now also has a passing
+[logical backup/restore qualification](experiments/ha-backup-restore.md), with
+clone-only sequence preparation and no live writer change. The disposable
+handoff rehearsal and failed load qualification remain gates before cutover.
 
 ## Purpose and goals
 
