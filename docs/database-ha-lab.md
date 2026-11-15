@@ -172,6 +172,10 @@ A [private cross-VM endpoint](database-connectivity.md) is now available and
 verified from a temporary application-cluster client. The live Fastify service
 still uses its original database.
 
+[Logical replication preparation](database-replication.md) has also passed a
+disposable fixture rehearsal against a separate temporary database in this tier.
+That database and its subscription were removed; real links remain on the source.
+
 No database backups, WAL archive, source replication stream, Grafana integration
 or off-host durability policy is configured for this disposable tier yet. The
 original source backup remains on the Mac. Do not use this lab as the sole home

@@ -148,6 +148,7 @@ kind-specific Docker bridge with the destination's private database endpoint.
 The client Service name, certificate validation and application-facing SQL
 contract can remain the same after verification in the new environment.
 
-The next increment is to finalize source-to-destination replication, inventory
-objects excluded from that replication method, and prepare the source restart
-requirements. The existing source database remains the only application writer.
+[Replication preparation](database-replication.md) now records the object
+inventory, staged restart settings and a disposable logical-replication rehearsal.
+The next increment is the consolidated source maintenance bundle, including the
+private reverse endpoint. The existing source remains the only application writer.

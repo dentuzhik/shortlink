@@ -37,6 +37,18 @@ address. Endpoint refresh is explicit and the bridge is a single dependency; it
 is not a complete database HA claim. The live Fastify Deployment has not switched
 to this endpoint.
 
+## Snapshot copy plus a change stream
+
+The [logical replication rehearsal](database-replication.md) copies fixture tables
+and then streams committed row changes from a disposable publisher to the actual
+CloudNativePG primary. One publication/subscription pair covers links and
+migration history. Pausing and resuming the subscriber demonstrates WAL retention
+and catch-up; independent sequence handling prepares for a future writer change.
+
+This is a migration pattern validated with fixtures. The live source is not yet
+publishing changes, schema/roles/sequences still require explicit handling, and
+no application cutover or zero-downtime migration is claimed.
+
 ## Shared application logic and a repository boundary
 
 REST and GraphQL call `createLinkCreator`, which owns URL validation, random

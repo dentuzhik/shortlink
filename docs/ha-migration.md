@@ -29,6 +29,11 @@ recovery; no timing or durability settings were tuned.
 verified with a temporary client in the existing application cluster, including
 TLS identity/authentication and fixture replay. Fastify still uses its old
 database; real-data replication and writer cutover have not begun.
+[Logical replication preparation](database-replication.md) now includes a live
+object/settings inventory, dry-run source patch and passing disposable cross-VM
+initial-copy/change-stream rehearsals. The source remains unchanged and the
+maintenance window unused; live reverse connectivity/TLS and restart preparation
+must be completed before creating the real migration stream.
 
 ## Purpose and goals
 
@@ -219,9 +224,10 @@ replication and failover behavior understood using disposable data.
 
 ### 3. Replicate existing data
 
-Select the source-to-destination replication method. Logical replication is the
-preferred candidate for a procedure we can repeat across platforms; it is not
-yet an implemented or finalized choice. Physical replication within the new HA
+Use native PostgreSQL logical replication as the source-to-destination approach,
+with explicit publication tables and one subscription. The [preparation and
+fixture rehearsal](database-replication.md) validate the approach on our current
+versions; the live stream is not started. Physical replication within the new HA
 tier is a separate mechanism from this initial migration stream.
 
 Keep the existing database as the only application writer. Copy the schema and
