@@ -17,6 +17,15 @@ export function readDatabaseUrl(value: string | undefined): string {
   return url.href;
 }
 
+export function readDatabaseUser(connectionString: string): string {
+  const user = new URL(connectionString).username;
+  if (!user)
+    throw new Error(
+      "The HA database URL requires an explicit application user",
+    );
+  return decodeURIComponent(user);
+}
+
 export function createDatabasePool(
   connectionString: string,
   max: number,

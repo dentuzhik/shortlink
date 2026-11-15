@@ -5,7 +5,7 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
   /usr/lib/postgresql/18/bin/initdb -D "$PGDATA" --username=fixture_admin \
     --encoding=UTF8 --locale-provider=libc --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8 \
     --auth-local=trust --auth-host=scram-sha-256
-  printf '%s\n' 'hostssl shortener shortlink_lab all scram-sha-256' >> "$PGDATA/pg_hba.conf"
+  printf '%s\n' 'hostssl shortener shortlink_app all scram-sha-256' 'host all shortlink_app all reject' 'host replication shortlink_app all reject' >> "$PGDATA/pg_hba.conf"
 fi
 cp /tls/server.key "$PGDATA/server.key"
 chmod 600 "$PGDATA/server.key"

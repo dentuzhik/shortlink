@@ -48,7 +48,7 @@ test("fixture fencing SQL checks its source startup marker before changing permi
   const sql = fenceSql(template, id);
   assert.ok(
     sql.indexOf("current_setting('shortlink.handoff_fixture',true)") <
-      sql.indexOf("ALTER ROLE"),
+      sql.indexOf("REVOKE INSERT"),
   );
   assert.ok(sql.includes(`IS DISTINCT FROM '${id}'`));
   assert.ok(sql.includes("GRANT SELECT"));

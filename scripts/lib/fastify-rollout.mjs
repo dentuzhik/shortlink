@@ -4,15 +4,20 @@ export function fastifyRolloutPlan(args) {
     return { action: "ha-target" };
   if (
     args.length !== 2 ||
-    !["--deploy", "--deploy-local"].includes(args[0]) ||
+    !["--deploy", "--deploy-local", "--application-roles"].includes(args[0]) ||
     !/^[a-f0-9]{40}$/.test(args[1])
   ) {
     throw new Error(
-      "Use test-rolling-restart.mjs [--deploy|--deploy-local FULL_GIT_SHA | --prepare-ha-target]",
+      "Use test-rolling-restart.mjs [--deploy|--deploy-local FULL_GIT_SHA | --application-roles FULL_GIT_SHA | --prepare-ha-target]",
     );
   }
   return {
-    action: args[0] === "--deploy" ? "deploy" : "deploy-local",
+    action:
+      args[0] === "--application-roles"
+        ? "application-roles"
+        : args[0] === "--deploy"
+          ? "deploy"
+          : "deploy-local",
     revision: args[1],
   };
 }

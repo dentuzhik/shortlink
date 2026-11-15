@@ -19,6 +19,10 @@ test("a versioned load test requires an explicit immutable revision and never fa
     action: "deploy-local",
     revision: sha,
   });
+  assert.deepEqual(fastifyRolloutPlan(["--application-roles", sha]), {
+    action: "application-roles",
+    revision: sha,
+  });
   for (const args of [
     ["--deploy"],
     ["--deploy", "main"],

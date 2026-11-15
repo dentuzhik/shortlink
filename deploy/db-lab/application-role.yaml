@@ -1,0 +1,25 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: shortlink-runtime
+  namespace: database-lab
+  labels:
+    shortlink.dev/exercise: application-roles
+spec:
+  cluster:
+    name: shortlink-lab
+  name: shortlink_app
+  ensure: present
+  connectionLimit: -1
+  comment: shortlink:runtime-application:v1
+  login: true
+  superuser: false
+  createdb: false
+  createrole: false
+  inherit: false
+  replication: false
+  bypassrls: false
+  inRoles: []
+  passwordSecret:
+    name: shortlink-runtime-login
+  databaseRoleReclaimPolicy: retain

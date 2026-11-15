@@ -64,6 +64,9 @@ spec:
       memory: "512Mi"
   postgresql:
     pg_hba:
+      - hostssl shortener shortlink_app all scram-sha-256
+      - host all shortlink_app all reject
+      - host replication shortlink_app all reject
       - hostnossl shortlink_lab shortlink_lab 0.0.0.0/0 reject
       - hostnossl shortlink_lab shortlink_lab ::/0 reject
     synchronous:

@@ -72,7 +72,9 @@
     "db:ha:target": "node scripts/prepare-ha-target.mjs",
     "test:ha-target-rollout": "node scripts/test-rolling-restart.mjs --prepare-ha-target",
     "test:db-restore:ha": "pnpm --filter @url-shortener/redirect-service... build && node scripts/rehearse-db-restore.mjs --ha",
-    "test:db-handoff": "node scripts/rehearse-handoff.mjs"
+    "test:db-handoff": "node scripts/rehearse-handoff.mjs",
+    "db:app-roles": "node scripts/prepare-application-roles.mjs",
+    "test:app-role-rollout": "node scripts/test-rolling-restart.mjs --application-roles"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

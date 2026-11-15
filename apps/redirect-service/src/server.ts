@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
-import { readDatabaseUrl } from "./database.js";
+import { readDatabaseUrl, readDatabaseUser } from "./database.js";
 import type { DatabaseTarget } from "./database-pools.js";
 import {
   kubernetesMaintenanceSource,
@@ -20,10 +20,11 @@ if (process.env.HA_DATABASE_URL) {
   if (!process.env.HA_DATABASE_CA_FILE || !process.env.HA_DATABASE_SERVERNAME) {
     throw new Error("HA database requires a CA file and TLS server name");
   }
+  const connectionString = readDatabaseUrl(process.env.HA_DATABASE_URL);
   ha = {
-    connectionString: readDatabaseUrl(process.env.HA_DATABASE_URL),
+    connectionString,
     expectedDatabase: "shortener",
-    expectedRole: "shortlink_lab",
+    expectedRole: readDatabaseUser(connectionString),
     ssl: {
       ca: readFileSync(process.env.HA_DATABASE_CA_FILE, "utf8"),
       servername: process.env.HA_DATABASE_SERVERNAME,

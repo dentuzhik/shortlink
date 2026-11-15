@@ -30,6 +30,18 @@ ensure(
   ["stage", "rollout", "verify"].includes(action) && !extra.length,
   "Use prepare-ha-target.mjs stage|rollout|verify; this command never activates HA",
 );
+const applicationRoles = await appKube([
+  "get",
+  "configmap",
+  "runtime-application-roles",
+  "--ignore-not-found",
+  "-o",
+  "json",
+]);
+ensure(
+  !applicationRoles.trim(),
+  "Dedicated runtime roles are staged; use db:app-roles verify instead of restoring the legacy HA owner login",
+);
 const path = await directory("ha-target-preparation");
 const report = { startedAt: new Date().toISOString(), action, passed: false };
 const runtime = async (args = ["status"]) =>

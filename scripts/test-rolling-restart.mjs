@@ -17,11 +17,17 @@ process.env.DOCKER_CONTEXT = "colima";
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const redirectRate = Number(process.env.RATE ?? 1000);
 const createRate = Number(process.env.CREATE_RATE ?? 10);
+const redirectWorkers = Number(process.env.REDIRECT_WORKERS ?? 350);
+const createWorkers = Number(process.env.CREATE_WORKERS ?? 50);
 if (
   !Number.isSafeInteger(redirectRate) ||
   redirectRate < 1 ||
   !Number.isSafeInteger(createRate) ||
-  createRate < 0
+  createRate < 0 ||
+  !Number.isSafeInteger(redirectWorkers) ||
+  redirectWorkers < 1 ||
+  !Number.isSafeInteger(createWorkers) ||
+  createWorkers < 1
 ) {
   throw new Error(
     "RATE must be a positive integer; CREATE_RATE must be nonnegative",
@@ -54,6 +60,18 @@ if (
 }
 
 let imagePreparation;
+if (plan.action === "application-roles") {
+  const staged = await execute(
+    "node",
+    ["scripts/prepare-application-roles.mjs", "stage", plan.revision],
+    { timeout: 420000, maxBuffer: 8 * 1024 * 1024 },
+  );
+  imagePreparation = {
+    mode: "Both runtime roles and published image staged",
+    log: staged.stdout,
+  };
+  process.stdout.write(staged.stdout);
+}
 if (plan.action === "ha-target") {
   const staged = await execute(
     "node",
@@ -114,6 +132,8 @@ const report = {
   runDir,
   rate: redirectRate,
   createRate,
+  redirectWorkers,
+  createWorkers,
   durationSeconds: 90,
   phases: { baselineSeconds: 20, restartWindowSeconds: 40, afterSeconds: 30 },
   image: deployment.spec.template.spec.containers[0].image,
@@ -250,6 +270,10 @@ const args = nativeRunner
       `RATE=${redirectRate}`,
       "-e",
       `CREATE_RATE=${createRate}`,
+      "-e",
+      `REDIRECT_WORKERS=${redirectWorkers}`,
+      "-e",
+      `CREATE_WORKERS=${createWorkers}`,
       "benchmarks/rolling-restart.js",
     ]
   : [
@@ -281,6 +305,10 @@ const args = nativeRunner
       `RATE=${redirectRate}`,
       "-e",
       `CREATE_RATE=${createRate}`,
+      "-e",
+      `REDIRECT_WORKERS=${redirectWorkers}`,
+      "-e",
+      `CREATE_WORKERS=${createWorkers}`,
       "/benchmarks/rolling-restart.js",
     ];
 report.runner = nativeRunner ? "native" : "docker (shares the Colima VM)";
@@ -360,7 +388,15 @@ try {
   console.log(`Requesting Fastify ${plan.action}; k6 traffic continues.`);
   if (plan.action === "restart")
     await kube("rollout", "restart", "deployment/redirect-service");
-  else if (plan.action === "ha-target") {
+  else if (plan.action === "application-roles") {
+    const prepared = await execute(
+      "node",
+      ["scripts/prepare-application-roles.mjs", "rollout", plan.revision],
+      { timeout: 180000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    await writeFile(`${runDir}/application-roles.log`, prepared.stdout);
+    process.stdout.write(prepared.stdout);
+  } else if (plan.action === "ha-target") {
     const prepared = await execute(
       "node",
       ["scripts/prepare-ha-target.mjs", "rollout"],
@@ -409,7 +445,8 @@ try {
         })
       ).stdout,
     );
-    if (plan.action === "ha-target") assertSourceStatus(result, true);
+    if (["ha-target", "application-roles"].includes(plan.action))
+      assertSourceStatus(result, true);
     else assertSourceConfiguration(result.desired);
     report.runtimeStatus = result.pods.filter((pod) =>
       report.replacementPods.includes(pod.pod),

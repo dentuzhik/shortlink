@@ -25,7 +25,8 @@ The [coordinator](../scripts/rehearse-handoff.mjs) creates a run-labelled
 
 - A source PostgreSQL 18.6 instance, a destination PostgreSQL 18.7 instance and
   a TLS-verified logical subscription between them.
-- Two Fastify replicas using the same immutable image as the live deployment,
+- Two Fastify replicas using the live immutable image (or explicit published
+  `HANDOFF_API_IMAGE` for predeployment qualification),
   separate credentials and the actual ConfigMap watch/pool-switching code.
 - Namespace-local runtime RBAC, ConfigMap, Services and short-lived TLS material.
 - A k6 Pod targeting both Fastify pod IPs directly, with summaries written to logs.
@@ -90,21 +91,21 @@ It never automatically switches a live writer or reopens the live gate.
 
 ## Fencing scope and a real-source prerequisite
 
-The fixture application login is a separate superuser that owns its application
-objects. The [fixture-only fence](../deploy/migration/handoff/fence.sql) uses an
-independent administrator to remove elevated attributes, reassign object
-ownership, revoke write/schema-creation/sequence rights and retain SELECT.
-A table lock serializes this operation with previously admitted database DML.
-This protects against ordinary old clients, including an already open connection;
-an administrator who can restore permissions is outside that guarantee.
+The fixture now uses dedicated `shortlink_app` runtime roles on source and
+destination. Both are nonsuperusers, have no memberships and own no application
+objects. Independent owner/admin accounts apply schema and sequence changes.
+The [fixture-only fence](../deploy/migration/handoff/fence.sql) revokes source
+INSERT and identity-sequence USAGE while retaining SELECT. A table lock
+serializes the operation with previously admitted database DML. The very same
+old connection must then fail INSERT; changing its login password alone would
+not revoke an existing session's permissions.
 
-The real source login `shortener` is **the bootstrap superuser (OID 10)**.
-PostgreSQL does not permit demoting that account. Therefore this is not yet an
-executable fence for the live source. Before using permission-based fencing in
-the real cutover, Fastify must move onto a dedicated application role, with its
-privileges and existing connection behavior tested. Choosing another fencing
-mechanism would require its own qualification. This prerequisite is explicitly
-separate from a successful disposable run.
+The original passing run used a non-bootstrap superuser fixture, as preserved
+in its historical report. The [runtime-role increment](database-application-roles.md)
+aligns the fixture and live role model. The live bootstrap account `shortener`
+remains an administrator; Fastify must use its separate runtime login before a
+real permission fence can be applied. Administrators capable of restoring
+permissions are outside this ordinary-runtime-client fencing guarantee.
 
 ## Evidence and limits
 

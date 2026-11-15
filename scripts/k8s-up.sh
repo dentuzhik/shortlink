@@ -57,7 +57,11 @@ kube apply -f deploy/k8s/runtime-maintenance.yaml
 if ! kube get configmap shortlink-runtime >/dev/null 2>&1; then
   kube create -f deploy/k8s/runtime-control.yaml
 fi
-kube apply -f deploy/k8s/apps.yaml
+# Render enabled runtime credentials before applying a Pod template, so a local
+# rerun cannot briefly reintroduce the administrator Secret into Fastify.
+kube create --dry-run=client -f deploy/k8s/apps.yaml -o json \
+  | node scripts/render-application-roles.mjs \
+  | kube apply -f -
 if [ "$existing_apps" = true ]; then
   # Local images keep their tags, so explicitly replace the old pods on reruns.
   kube rollout restart deployment/redirect-service deployment/web

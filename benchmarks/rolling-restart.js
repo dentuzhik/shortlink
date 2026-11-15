@@ -5,12 +5,18 @@ import { Rate, Trend } from "k6/metrics";
 const baseUrl = __ENV.BASE_URL ?? "http://127.0.0.1:8080";
 const redirectRate = Number(__ENV.RATE ?? 1000);
 const createRate = Number(__ENV.CREATE_RATE ?? 10);
+const redirectWorkers = Number(__ENV.REDIRECT_WORKERS ?? 350);
+const createWorkers = Number(__ENV.CREATE_WORKERS ?? 50);
 const seconds = 90;
 if (
   !Number.isSafeInteger(redirectRate) ||
   redirectRate < 1 ||
   !Number.isSafeInteger(createRate) ||
-  createRate < 0
+  createRate < 0 ||
+  !Number.isSafeInteger(redirectWorkers) ||
+  redirectWorkers < 1 ||
+  !Number.isSafeInteger(createWorkers) ||
+  createWorkers < 1
 ) {
   throw new Error(
     "RATE must be a positive integer; CREATE_RATE must be nonnegative",
@@ -59,8 +65,8 @@ export const options = {
       duration: `${seconds}s`,
       // Allocate the existing worker ceiling before load starts so a short
       // latency spike does not also require k6 to initialize more workers.
-      preAllocatedVUs: 350,
-      maxVUs: 350,
+      preAllocatedVUs: redirectWorkers,
+      maxVUs: redirectWorkers,
       gracefulStop: "5s",
     },
     ...(createRate > 0
@@ -71,8 +77,8 @@ export const options = {
             rate: createRate,
             timeUnit: "1s",
             duration: `${seconds}s`,
-            preAllocatedVUs: 50,
-            maxVUs: 50,
+            preAllocatedVUs: createWorkers,
+            maxVUs: createWorkers,
             gracefulStop: "5s",
           },
         }
