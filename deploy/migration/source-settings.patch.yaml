@@ -1,8 +1,10 @@
-# STAGED ONLY: apply once TLS, reverse routing and VM sizing are ready.
-# Changing this Pod template restarts the single source Postgres Deployment.
+# Applied only inside the consolidated source maintenance window.
+# Existing data PVC and image are retained; this changes the single Pod template.
 spec:
   template:
     spec:
+      securityContext:
+        fsGroup: 999
       containers:
         - name: postgres
           args:
@@ -15,3 +17,31 @@ spec:
             - max_wal_senders=10
             - -c
             - max_slot_wal_keep_size=128MB
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgresql/publisher-tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/postgresql/publisher-tls/tls.key
+            - -c
+            - hba_file=/etc/postgresql/publisher-hba/pg_hba.conf
+          volumeMounts:
+            - name: publisher-tls
+              mountPath: /etc/postgresql/publisher-tls
+              readOnly: true
+            - name: publisher-hba
+              mountPath: /etc/postgresql/publisher-hba
+              readOnly: true
+      volumes:
+        - name: publisher-tls
+          secret:
+            secretName: source-publisher-tls
+            defaultMode: 0440
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: publisher-hba
+          configMap:
+            name: source-publisher-hba

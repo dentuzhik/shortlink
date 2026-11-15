@@ -279,6 +279,10 @@ try {
     SELECT setval('drizzle.__drizzle_migrations_id_seq',2000,true);
 
   `);
+  const roleSql = (await readFile("deploy/migration/source-role.sql", "utf8"))
+    .replaceAll("shortener", "migration_fixture")
+    .replaceAll("shortlink_migrator", "fixture_repl");
+  await publisherSql(roleSql);
   const publicationSql = (
     await readFile("deploy/migration/source-publication.sql", "utf8")
   )

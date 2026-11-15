@@ -1,0 +1,31 @@
+{
+  "apiVersion": "postgresql.cnpg.io/v1",
+  "kind": "Cluster",
+  "metadata": {
+    "name": "shortlink-lab",
+    "namespace": "database-lab"
+  },
+  "spec": {
+    "externalClusters": [
+      {
+        "name": "migration-source",
+        "connectionParameters": {
+          "host": "migration-source.database-lab.svc.cluster.local",
+          "port": "5432",
+          "dbname": "shortener",
+          "user": "shortlink_migrator",
+          "sslmode": "verify-full",
+          "connect_timeout": "3"
+        },
+        "sslRootCert": {
+          "name": "migration-source-client",
+          "key": "ca.crt"
+        },
+        "password": {
+          "name": "migration-source-client",
+          "key": "password"
+        }
+      }
+    ]
+  }
+}

@@ -13,7 +13,8 @@ completed on November 14, 2026. It proposes profile budgets and a first-phase
 worker-failure topology; no VM or cluster changes have been made.
 The [backup/restore rehearsal](experiments/backup-restore.md) subsequently passed
 twice; the [procedure](database-recovery.md) and command are available for reuse.
-The single maintenance interruption remains unused.
+The single planned source interruption was [used on November 15](experiments/source-maintenance.md)
+to resize the application VM and prepare logical replication/TLS.
 The [CloudNativePG lab](database-ha-lab.md) is now provisioned with disposable
 data and verified healthy synchronous replication. The user selected one required
 synchronous standby. Its [bootstrap report](experiments/cloudnativepg-bootstrap.md)
@@ -31,9 +32,10 @@ TLS identity/authentication and fixture replay. Fastify still uses its old
 database; real-data replication and writer cutover have not begun.
 [Logical replication preparation](database-replication.md) now includes a live
 object/settings inventory, dry-run source patch and passing disposable cross-VM
-initial-copy/change-stream rehearsals. The source remains unchanged and the
-maintenance window unused; live reverse connectivity/TLS and restart preparation
-must be completed before creating the real migration stream.
+initial-copy/change-stream rehearsals. [Source maintenance](source-maintenance.md) subsequently completed: the
+application VM is six CPUs/six GiB, the source has logical WAL/TLS and the reverse
+endpoint is verified. No real-data publication/subscription has started; the old
+source remains the only application writer.
 
 ## Purpose and goals
 
@@ -57,7 +59,8 @@ The learning goals are to:
 
 The existing deployment has one kind node, `shortlink-control-plane`, in the
 `shortlink` cluster and the current Colima profile. The documented allocation is
-4 CPUs / 4 GiB; verify the actual configuration before sizing the exercise.
+6 CPUs / 6 GiB after source maintenance; the database profile remains at 4/4.
+These budgets still need qualification under peak application-cluster overlap.
 Fastify has two replicas, Next.js and Traefik one each. Postgres has one instance
 and a node-local persistent volume; Redis is an ephemeral cache.
 

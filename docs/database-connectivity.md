@@ -141,7 +141,8 @@ control-plane node. This connection path does not establish end-to-end HA,
 zero-error failover or the application's throughput/latency budget. The bridge
 also has its own limits: 0.25 CPU, 64 MiB, 256 connections and 60-second client/server
 idle timeouts. These are initial lab settings, not measured capacity targets. The original
-source maintenance allowance remains unused.
+source maintenance allowance was subsequently used by the
+[consolidated bundle](source-maintenance.md).
 
 For Raspberry Pi or cloud hardware, replace Lima address discovery and the
 kind-specific Docker bridge with the destination's private database endpoint.
@@ -150,5 +151,6 @@ contract can remain the same after verification in the new environment.
 
 [Replication preparation](database-replication.md) now records the object
 inventory, staged restart settings and a disposable logical-replication rehearsal.
-The next increment is the consolidated source maintenance bundle, including the
-private reverse endpoint. The existing source remains the only application writer.
+The [source maintenance bundle](source-maintenance.md) has since completed,
+including the private reverse endpoint. Real-data initial copy and change
+streaming are next; the existing source remains the only application writer.

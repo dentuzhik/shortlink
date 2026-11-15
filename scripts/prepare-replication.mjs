@@ -1,10 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import {
+  appGet,
   appKube,
   dbGet,
   dbKube,
   directory,
   ensure,
+  run,
   sourceState,
 } from "./lib/db-lab-connectivity.mjs";
 
@@ -129,13 +131,36 @@ try {
   }));
   report.schema =
     "Copy schema without source ownership/ACLs; map ownership to shortlink_lab and freeze DDL during migration";
+  const maintenance = (
+    await appGet([
+      "get",
+      "configmap",
+      "-l",
+      "shortlink.dev/exercise=source-maintenance",
+    ])
+  ).items.find((c) => c.metadata.name === "source-maintenance-state");
+  const maintained = maintenance?.data.status === "completed";
   report.blockers = [
     ...(sourceSettings.wal_level !== "logical"
       ? ["Source wal_level=logical requires restart"]
       : []),
-    "Live reverse endpoint, verified TLS and dedicated replication credentials are not deployed",
-    "Consolidate VM resize and all source restart requirements before the single maintenance window",
-    "Source WAL retention and destination backup/recovery must be qualified before authority moves",
+    ...(sourceSettings.ssl !== "on" ? ["Source TLS is not enabled"] : []),
+    ...(!maintained
+      ? [
+          "Source maintenance, reverse endpoint and credentials are not yet verified",
+        ]
+      : []),
+  ];
+  if (maintained)
+    report.reversePathCheck = JSON.parse(
+      await run("node", ["scripts/source-maintenance.mjs", "check"]),
+    );
+  report.readyForLiveReplication = report.blockers.length === 0;
+  report.liveStreamStarted = false;
+  report.futureCutoverRequirements = [
+    "Ongoing WAL/lag/disk monitoring and copy verification",
+    "Destination backup/recovery qualification",
+    "Writer fencing, sequence synchronization, pool handoff and bounded creation behavior",
   ];
   const schema = await appKube([
     "exec",
@@ -185,7 +210,7 @@ try {
   console.log(
     JSON.stringify({
       passed: report.passed,
-      readyForLiveReplication: false,
+      readyForLiveReplication: report.readyForLiveReplication,
       evidence: `${path}/result.json`,
     }),
   );

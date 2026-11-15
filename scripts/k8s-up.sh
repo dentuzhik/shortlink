@@ -32,6 +32,11 @@ kube apply -f deploy/k8s/namespace.yaml
 kube create secret generic postgres-credentials \
   --from-env-file=deploy/k8s/.env.example --dry-run=client -o yaml | kube apply -f -
 kube apply -f deploy/k8s/postgres.yaml
+# Retain the completed source migration configuration on ordinary local reruns.
+# Prepared Secrets alone must never trigger the one-time maintenance restart.
+if [ "$(kube get configmap source-maintenance-state -o jsonpath='{.data.status}' 2>/dev/null || true)" = completed ]; then
+  kube patch deployment postgres --type=strategic --patch-file=deploy/migration/source-settings.patch.yaml
+fi
 kube rollout status deployment/postgres --timeout=120s
 kube apply -f deploy/k8s/redis.yaml
 kube rollout status deployment/redis --timeout=120s

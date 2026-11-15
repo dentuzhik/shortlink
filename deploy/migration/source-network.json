@@ -1,0 +1,14 @@
+{
+  "serviceName": "migration-source",
+  "hostname": "migration-source.database-lab.svc.cluster.local",
+  "sourceService": "postgres-publisher",
+  "bridgeName": "shortlink-publisher-edge",
+  "listenPort": 15433,
+  "nodePort": 30433,
+  "externalCluster": "migration-source",
+  "clientSecret": "migration-source-client",
+  "vmCpus": 6,
+  "vmMemoryGiB": 6,
+  "retentionMiB": 128,
+  "planningPauseMinutes": 30
+}

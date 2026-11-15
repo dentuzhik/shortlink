@@ -174,7 +174,9 @@ still uses its original database.
 
 [Logical replication preparation](database-replication.md) has also passed a
 disposable fixture rehearsal against a separate temporary database in this tier.
-That database and its subscription were removed; real links remain on the source.
+That database and its subscription were removed; real links remain on the source. The
+[source maintenance bundle](source-maintenance.md) has now enabled the reverse
+TLS path and shared subscriber credentials. No live migration stream has started.
 
 No database backups, WAL archive, source replication stream, Grafana integration
 or off-host durability policy is configured for this disposable tier yet. The

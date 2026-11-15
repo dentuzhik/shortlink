@@ -51,7 +51,12 @@
     "k8s:deploy:web": "node scripts/release-redirect.mjs web deploy",
     "k8s:rollback:web": "node scripts/release-redirect.mjs web rollback",
     "k8s:version:web": "node scripts/release-redirect.mjs web status",
-    "test:release": "node --test scripts/test/*.test.mjs"
+    "test:release": "node --test scripts/test/*.test.mjs",
+    "db:source:prepare": "node scripts/source-maintenance.mjs prepare",
+    "test:source-maintenance": "node scripts/source-maintenance.mjs rehearse",
+    "db:source:maintain": "node scripts/source-maintenance.mjs apply",
+    "db:source:check": "node scripts/source-maintenance.mjs check",
+    "db:source:resume": "node scripts/source-maintenance.mjs resume"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

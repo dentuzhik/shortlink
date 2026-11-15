@@ -5,8 +5,9 @@
 
 **Status:** source/destination inventory and a disposable cross-VM logical
 replication rehearsal pass. The source settings and publication/subscription SQL
-are staged for review. The live source is unchanged: no restart, replication
-role, publication, logical slot, subscription or real-data copy has been made.
+define the real-data stream. Source restart and credentials were completed by the
+[source maintenance bundle](source-maintenance.md); no publication, logical slot,
+subscription or real-data copy is started by the preparation commands.
 
 ## Approach and connection direction
 
@@ -88,22 +89,24 @@ schema without ownership/ACLs, and asks Kubernetes to validate the settings patc
 with `--dry-run=server`. It does not apply the patch. Private evidence lives under
 `.kind/db-cluster/replication-preparation/<timestamp>/`.
 
-The source currently has `wal_level=replica`, TLS off, ten replication slots, ten
-WAL senders and no replication objects. The destination has four logical workers,
+The original inventory found `wal_level=replica` and TLS off. After
+[source maintenance](source-maintenance.md), the source has logical WAL, TLS,
+ten replication slots, ten WAL senders and no live replication objects. The destination has four logical workers,
 ten replication origins and 32 total workers, enough for this tested one-stream,
-two-table rehearsal. Source `wal_level=logical` requires restart; the current
+two-table rehearsal. That setting change required the completed source restart; the current
 single-instance Postgres Deployment uses `Recreate`.
 [Logical replication settings](https://www.postgresql.org/docs/18/logical-replication-config.html).
 
 Review these staged files:
 
 - [Source settings patch](../deploy/migration/source-settings.patch.yaml): enables
-  logical WAL and retains ten slots/senders. Applying it changes the Pod template
-  and restarts the single source instance; it is not wired into ordinary startup.
-- [Source role/publication SQL](../deploy/migration/source-publication.sql): creates
-  a separate nonsuperuser replication login, grants SELECT on the explicit tables
-  and publishes INSERT/UPDATE/DELETE/TRUNCATE. Password provisioning and TLS/HBA
-  restrictions are prerequisites, not included or applied by this file.
+  logical WAL and retains ten slots/senders. It was applied inside the completed maintenance window. Changing its Pod
+  template can restart the single source instance; ordinary startup preserves
+  the completed configuration using the maintenance marker.
+- [Source role SQL](../deploy/migration/source-role.sql) provisions the separate
+  nonsuperuser login and SELECT grants during source maintenance. The independent
+  [publication SQL](../deploy/migration/source-publication.sql) publishes
+  INSERT/UPDATE/DELETE/TRUNCATE only when the later real-data stream starts.
 - [Destination subscription SQL](../deploy/migration/destination-subscription.sql):
   starts initial copy and text-based streaming. `synchronous_commit=on` is explicit
   for the subscriber, retaining its required standby-confirmation policy. It does
@@ -114,12 +117,12 @@ listing publication tables does not make it a publication-scoped security role;
 Postgres has no separate publication ACL. Do not reuse an application login.
 [Replication security](https://www.postgresql.org/docs/18/logical-replication-security.html).
 
-The patch's **128 MB `max_slot_wal_keep_size` is a provisional lab candidate**,
-rehearsed on the disposable publisher. It replaces unlimited slot retention, but
+The patch's **128 MB `max_slot_wal_keep_size` is the initial source limit**,
+reviewed against the [maintenance rehearsal's WAL samples](experiments/source-maintenance.md). It replaces unlimited slot retention, but
 is neither a measured outage allowance nor a hard disk-size cap: enforcement is
 checkpoint-dependent and exceeding it can invalidate the slot, requiring a new
-copy. Before applying it to the source, measure WAL generation and available
-storage, choose an acceptable catch-up window, and document abort/re-copy rules.
+copy. Before creating a live migration slot, monitor actual WAL generation/storage
+and apply the runbook's investigation and stop/re-copy thresholds.
 A tiny successful fixture does not qualify that retention budget.
 [Slot retention settings](https://www.postgresql.org/docs/18/runtime-config-replication.html#RUNTIME-CONFIG-REPLICATION-SENDER).
 
@@ -169,17 +172,15 @@ cleanup. Forced termination may require inspecting the recorded run ID for
 labeled Docker resources, its `migration_rehearsal_<suffix>` database and the
 matching private runtime files; do not delete unrelated replication resources.
 
-## Next maintenance checkpoint
+## Next replication checkpoint
 
-Before spending the allowed source interruption, prepare a combined change:
-private reverse endpoint, source TLS certificate/Secret and volume mounts,
-replication-role HBA rules, reviewed retention policy, fresh verified backup,
-source restart settings and any necessary VM resize. Size peak application-cluster
-overlap against the current four-GiB database VM rather than blindly applying the
-older proposed six-GiB database budget.
+The [source maintenance bundle](source-maintenance.md) and its
+[recorded verification](experiments/source-maintenance.md) are complete. The
+single maintenance allowance has been used; the application VM is six/six and
+the database VM remains four/four.
 
-Then rehearse that bundle, run the one planned maintenance window and verify
-source recovery. Only afterward create the live publication/subscription, copy
-real rows, monitor lag/WAL retention and compare contents while the old source
-remains authoritative. Destination backup/recovery, application waiting,
-idempotency and writer fencing remain prerequisites for the later writer cutover.
+Next copy the schema, create the explicit publication/subscription and verify
+real rows plus a cohort created during initial synchronization. Monitor lag,
+retained WAL and disk headroom from the start. The old source remains the only
+application writer. Destination recovery, writer fencing, sequence correction,
+idempotency and application-pool handoff remain later cutover prerequisites.

@@ -49,6 +49,18 @@ This is a migration pattern validated with fixtures. The live source is not yet
 publishing changes, schema/roles/sequences still require explicit handling, and
 no application cutover or zero-downtime migration is claimed.
 
+## Controlled maintenance boundary and subscriber credentials
+
+The [source maintenance bundle](source-maintenance.md) closes one public bridge
+while resizing the application VM and replacing the source database Pod. Data
+hashes and per-pod redirects are checked before reopening traffic. This is an
+explicit planned interruption, not zero-downtime database maintenance.
+
+The new tier can reach the old publisher through a separate private endpoint.
+CloudNativePG materializes Secret-backed trust and private password files on all
+three instances through its external-cluster manager. Source logical WAL/TLS are
+configured, but no real-data publication/subscription is running yet.
+
 ## Shared application logic and a repository boundary
 
 REST and GraphQL call `createLinkCreator`, which owns URL validation, random
