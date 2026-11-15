@@ -45,12 +45,18 @@ and a passing staged-image rollout under load. The real HA application
 [connection target](experiments/ha-target-preparation.md) is now staged and
 validated by both Fastify replicas; source remains selected. Its full rollout
 load trial failed client thresholds, including baseline errors, and is not a
-clean load qualification. Database fencing, destination recovery qualification
-and safe handling of ambiguous write outcomes remain separate increments; the
+clean load qualification. Live writer fencing and safe handling of ambiguous write outcomes remain
+separate increments; the
 source remains authoritative. The HA tier now also has a passing
 [logical backup/restore qualification](experiments/ha-backup-restore.md), with
-clone-only sequence preparation and no live writer change. The disposable
-handoff rehearsal and failed load qualification remain gates before cutover.
+clone-only sequence preparation and no live writer change. A
+[disposable handoff rehearsal](experiments/database-handoff.md) subsequently
+passed at 25 redirects/s plus two creation attempts/s, with a deliberate
+pre-fence failure and a measured 1.174-second successful creation-maintenance
+window. Its permission-based fence requires a dedicated source application
+role: the live login is the bootstrap superuser and cannot be demoted. That
+role preparation, the failed operating-load qualification and final preflight
+remain gates before real cutover.
 
 ## Purpose and goals
 

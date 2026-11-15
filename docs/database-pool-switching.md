@@ -188,9 +188,12 @@ sequences. The primary should show one idle TLS candidate session per replica.
 
 Preparing a target is distinct from making it authoritative. Source continues
 handling all reads and writes, and its new commits continue replicating into
-HA. Recovery qualification and a full writer-handoff rehearsal still precede
-the real cutover. See the [preparation trial](experiments/ha-target-preparation.md)
-for measured results and remaining boundaries.
+HA. The [logical recovery qualification](experiments/ha-backup-restore.md) and
+[disposable handoff](experiments/database-handoff.md) have passed; the latter
+used a 25/2 workload. Dedicated source-role preparation and operating-load
+qualification remain open before real cutover. See the
+[preparation trial](experiments/ha-target-preparation.md) for its separate
+measured results and remaining boundaries.
 
 ## Redis and old operations
 
