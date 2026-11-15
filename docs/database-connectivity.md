@@ -5,7 +5,8 @@
 
 **Status:** a temporary client in the existing application cluster can securely
 read and write disposable rows in the dedicated database tier. Fastify still
-uses its original Postgres. Existing links have not been replicated or moved.
+uses its original Postgres. A subsequent [real-data replication increment](database-replication-live.md)
+copied existing links; writer authority has not moved.
 
 ## Network path
 
@@ -152,5 +153,9 @@ contract can remain the same after verification in the new environment.
 [Replication preparation](database-replication.md) now records the object
 inventory, staged restart settings and a disposable logical-replication rehearsal.
 The [source maintenance bundle](source-maintenance.md) has since completed,
-including the private reverse endpoint. Real-data initial copy and change
-streaming are next; the existing source remains the only application writer.
+including the private reverse endpoint. [Initial copy and change streaming](database-replication-live.md)
+are now verified; the existing source remains the only application writer. The
+real copy is in database `shortener`, not the probe database `shortlink_lab`.
+Future application pool configuration must choose that database, verified TLS
+and reviewed application credentials explicitly; the probe Secret's database
+name is not the live destination configuration.

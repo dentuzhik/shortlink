@@ -56,7 +56,11 @@
     "test:source-maintenance": "node scripts/source-maintenance.mjs rehearse",
     "db:source:maintain": "node scripts/source-maintenance.mjs apply",
     "db:source:check": "node scripts/source-maintenance.mjs check",
-    "db:source:resume": "node scripts/source-maintenance.mjs resume"
+    "db:source:resume": "node scripts/source-maintenance.mjs resume",
+    "db:replication:start": "node scripts/live-replication.mjs start",
+    "db:replication:status": "node scripts/live-replication.mjs status",
+    "test:replication:live": "node scripts/live-replication.mjs verify",
+    "test:replication:watch": "node scripts/test-replication-watch.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

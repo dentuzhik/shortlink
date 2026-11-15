@@ -1,0 +1,8 @@
+{
+  "database": "shortener",
+  "owner": "shortlink_lab",
+  "publication": "shortlink_migration",
+  "subscription": "shortlink_migration_sub",
+  "sourceDatabase": "shortener",
+  "localePolicy": "preserve-source"
+}

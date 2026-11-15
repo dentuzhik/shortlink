@@ -6,13 +6,16 @@
 **Status:** source/destination inventory and a disposable cross-VM logical
 replication rehearsal pass. The source settings and publication/subscription SQL
 define the real-data stream. Source restart and credentials were completed by the
-[source maintenance bundle](source-maintenance.md); no publication, logical slot,
-subscription or real-data copy is started by the preparation commands.
+[source maintenance bundle](source-maintenance.md). The subsequent
+[real-data copy and stream](database-replication-live.md) are now running; the
+preparation commands themselves do not start them and reject existing source
+replication objects. Use the live status/verification commands after startup.
 
 ## Approach and connection direction
 
 Use PostgreSQL's built-in logical replication, with the original `shortener`
-database as publisher and the new `shortlink_lab` primary as subscriber. The old
+database as publisher and the new `shortener` database on the CNPG primary as
+subscriber. The separate `shortlink_lab` database remains for disposable probes. The old
 application remains the only writer until an explicitly coordinated cutover.
 The subscriber first copies the published tables and then applies subsequent
 committed changes. One subscription keeps transactions spanning the two tables
@@ -40,9 +43,9 @@ and verify the actual destination platform; this rehearsal used ARM64 Postgres
 
 The subscriber opens the network connection **back to the publisher**. Our
 existing application-to-new-database endpoint does not establish that reverse
-path. Before live replication, add a separate private publisher endpoint in the
-application VM, narrowly reachable from the database VM, with verified TLS and
-replication authentication. The fixture test uses a temporary publisher bound to
+path. [Source maintenance](source-maintenance.md) added a separate private
+publisher endpoint in the application VM, narrowly reachable from the database
+VM, with verified TLS and replication authentication. The fixture test uses a temporary publisher bound to
 application VM port 25432; it does not expose the live source through that port.
 
 ## Inventory and excluded objects
@@ -91,7 +94,8 @@ with `--dry-run=server`. It does not apply the patch. Private evidence lives und
 
 The original inventory found `wal_level=replica` and TLS off. After
 [source maintenance](source-maintenance.md), the source has logical WAL, TLS,
-ten replication slots, ten WAL senders and no live replication objects. The destination has four logical workers,
+ten replication slots and ten WAL senders. The later real-data increment created
+one publication and the live subscription slot. The destination has four logical workers,
 ten replication origins and 32 total workers, enough for this tested one-stream,
 two-table rehearsal. That setting change required the completed source restart; the current
 single-instance Postgres Deployment uses `Recreate`.
@@ -179,8 +183,8 @@ The [source maintenance bundle](source-maintenance.md) and its
 single maintenance allowance has been used; the application VM is six/six and
 the database VM remains four/four.
 
-Next copy the schema, create the explicit publication/subscription and verify
-real rows plus a cohort created during initial synchronization. Monitor lag,
-retained WAL and disk headroom from the start. The old source remains the only
-application writer. Destination recovery, writer fencing, sequence correction,
-idempotency and application-pool handoff remain later cutover prerequisites.
+The [initial real-data copy](database-replication-live.md) has now passed, including
+a cohort created during synchronization and ongoing WAL/disk checks. The old
+source remains the only application writer. Next rehearse writer handoff with
+disposable data; destination recovery, writer fencing, sequence correction,
+idempotency and application-pool coordination remain live-cutover prerequisites.

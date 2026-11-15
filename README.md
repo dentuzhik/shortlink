@@ -43,8 +43,9 @@ The [system design guide](docs/system-design.md) explains each pattern, its code
 and its limits. The app currently uses one Postgres instance and one Redis
 instance in a single-node local cluster.
 
-A separate [CloudNativePG lab](docs/database-ha-lab.md) runs disposable data in a
-dedicated Colima profile. It is not yet the live application's database tier.
+A separate [CloudNativePG tier](docs/database-ha-lab.md) in a dedicated Colima
+profile receives [replicated links](docs/database-replication-live.md). The live
+application still uses its original database.
 
 ## Documentation
 

@@ -14,6 +14,7 @@ import {
   sourceState,
   vmAddresses,
 } from "./lib/db-lab-connectivity.mjs";
+import { holdCopy } from "./lib/live-replication.mjs";
 
 const id = randomUUID().replaceAll("-", "");
 const name = `replication-fixture-${id.slice(0, 12)}`;
@@ -34,6 +35,7 @@ let publisherCreated = false;
 let volumeCreated = false;
 let databaseCreated = false;
 let primary;
+let copyLock;
 let interrupted = false;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {
@@ -320,6 +322,7 @@ try {
     `${config.tlsHostname}:${config.privatePort}:migration_fixture:fixture_repl:${password}\n`,
   );
   const connection = `host=${config.tlsHostname} hostaddr=${report.addresses.application} port=${config.privatePort} dbname=migration_fixture user=fixture_repl passfile=${passPath} sslmode=verify-full sslrootcert=${certPath} connect_timeout=3 application_name=${subscription}`;
+  copyLock = await holdCopy(primary, database);
   const subscriptionSql = (
     await readFile("deploy/migration/destination-subscription.sql", "utf8")
   )
@@ -328,6 +331,24 @@ try {
     .replace(":'source_conninfo'", `'${connection}'`);
   await destinationSql(subscriptionSql);
   report.checks.stagedSqlRehearsed = true;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const sync = (
+      await destinationSql(
+        `SELECT srsubstate FROM pg_subscription_rel WHERE srrelid='public.links'::regclass AND srsubid=(SELECT oid FROM pg_subscription WHERE subname='${subscription}');`,
+      )
+    ).trim();
+    if (sync === "d") break;
+    ensure(attempt < 39, "Did not observe held fixture table copy");
+    await delay(100);
+  }
+  ensure(copyLock.isHeld(), "Fixture copy lock expired before overlap test");
+  await publisherSql(
+    "INSERT INTO links(code,target_url) VALUES('copyOverlap','https://example.test/copy-overlap');",
+  );
+  await copyLock.release();
+  copyLock = undefined;
+  report.checks.concurrentCopyWrite = true;
+
   await compare("initialCopy");
   report.subscriptionRelations = JSON.parse(
     await destinationSql(
@@ -461,6 +482,14 @@ try {
   console.error(error.message);
 } finally {
   report.cleanupErrors = [];
+  if (copyLock) {
+    try {
+      await copyLock.release();
+    } catch (error) {
+      report.cleanupErrors.push(error.message);
+    }
+  }
+
   if (databaseCreated) {
     try {
       const found = (

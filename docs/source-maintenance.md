@@ -128,7 +128,8 @@ pnpm db:source:check            # Repeatable read-only post-maintenance verifica
 [Network/resource choices](../deploy/migration/source-network.json).
 
 Prepare/rehearse/apply/resume refuse to repeat a recorded completed maintenance window;
-use `db:source:check` afterward. The completion ConfigMap also lets ordinary local
+use `db:source:check` afterward. This read-only check also accepts the active
+replication slot created by the later live-copy increment. The completion ConfigMap also lets ordinary local
 startup preserve the configured source settings. Prepared Secrets alone do not
 trigger the change through ordinary startup.
 
@@ -147,7 +148,8 @@ moved, so configuration rollback does not require reverse replication.
 
 ## Next increment
 
-Verify the prepared publisher, create the publication/subscription, copy schema
-and real rows, and compare ongoing source/destination contents with explicit
-lag/WAL monitoring. Keep the original database as the only application writer.
-No application cutover or real-data stream is part of this maintenance bundle.
+The subsequent [initial copy and live stream](database-replication-live.md) now
+pass with explicit WAL/disk monitoring. The original database remains the only
+application writer. No application cutover or real-data stream is started by
+this maintenance bundle itself; the next checkpoint is a disposable handoff
+rehearsal, not another source maintenance window.

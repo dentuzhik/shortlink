@@ -26,7 +26,7 @@ through Next.js's `/graphql` rewrite and visits short links on the Fastify host.
 
 ## Private database endpoint and service discovery
 
-The disposable database tier has a verified [cross-VM path](database-connectivity.md):
+The separate database tier has a verified [cross-VM path](database-connectivity.md):
 a Service without a selector and a manually managed EndpointSlice give an
 application-cluster client a stable database name. A private TCP bridge reaches a
 CloudNativePG-managed NodePort Service that selects the current primary. TLS
@@ -45,9 +45,11 @@ CloudNativePG primary. One publication/subscription pair covers links and
 migration history. Pausing and resuming the subscriber demonstrates WAL retention
 and catch-up; independent sequence handling prepares for a future writer change.
 
-This is a migration pattern validated with fixtures. The live source is not yet
-publishing changes, schema/roles/sequences still require explicit handling, and
-no application cutover or zero-downtime migration is claimed.
+The [real-data copy and change stream](database-replication-live.md) now also
+implement this pattern: initial rows plus writes during synchronization match
+on the new primary and both standbys. A source-side periodic check watches slot
+retention and filesystem headroom. Schema/roles/sequences still require explicit
+handling, and no application cutover or zero-downtime migration is claimed.
 
 ## Controlled maintenance boundary and subscriber credentials
 
@@ -263,7 +265,7 @@ cluster migration. It separates intended goals from implemented guarantees and
 lists the decisions still required.
 
 The separate [CloudNativePG lab](database-ha-lab.md) now demonstrates healthy
-synchronous replication on disposable data. It has not migrated the live
+synchronous replication and a separate ongoing copy of real links. It has not migrated the live
 application or qualified unexpected database failover. A
 [planned switchover](experiments/database-switchover.md) preserved acknowledged
 test data but interrupted client access.

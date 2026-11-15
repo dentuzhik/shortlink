@@ -2,10 +2,11 @@
 
 [Project overview](../README.md) · [Migration exercise](ha-migration.md)
 
-**Status:** a disposable database tier is deployed and its healthy replication
-path is verified. The live application still uses its original Postgres in the
-existing `shortlink` kind cluster. No existing links have been copied into the
-lab, and no source writer or traffic endpoint has moved.
+**Status:** the database tier has healthy synchronous replication and now also
+contains a [verified copy of real links](database-replication-live.md) in the
+separate `shortener` database. Disposable probes remain in `shortlink_lab`. The
+live application still uses its original Postgres in the existing `shortlink`
+kind cluster; no source writer or traffic endpoint has moved.
 
 The [bootstrap results](experiments/cloudnativepg-bootstrap.md) include the
 failed six-GiB host-capacity check and the user-approved four-GiB repeat. They
@@ -13,17 +14,18 @@ are not evidence of failover safety, migration capacity or a throughput ceiling.
 
 ## Topology and versions
 
-| Boundary                              | Database lab                                      |
-| :------------------------------------ | :------------------------------------------------ |
-| Colima profile / Docker context       | `shortlink-db` / `colima-shortlink-db`            |
-| VM allocation                         | 4 CPUs, 4 GiB RAM, 40 GiB data disk               |
-| kind cluster / Kubernetes context     | `shortlink-db` / `kind-shortlink-db`              |
-| Private kubeconfig                    | `.kind/db-cluster/kubeconfig`                     |
-| Kubernetes                            | One control plane and three workers, v1.36.4      |
-| CloudNativePG                         | 1.30.1, operator namespace `cnpg-system`          |
-| Postgres                              | 18.7, three instances in namespace `database-lab` |
-| Postgres group / application database | `shortlink-lab` / `shortlink_lab`                 |
-| Storage                               | One five-GiB node-local PVC per instance          |
+| Boundary                          | Database lab                                      |
+| :-------------------------------- | :------------------------------------------------ |
+| Colima profile / Docker context   | `shortlink-db` / `colima-shortlink-db`            |
+| VM allocation                     | 4 CPUs, 4 GiB RAM, 40 GiB data disk               |
+| kind cluster / Kubernetes context | `shortlink-db` / `kind-shortlink-db`              |
+| Private kubeconfig                | `.kind/db-cluster/kubeconfig`                     |
+| Kubernetes                        | One control plane and three workers, v1.36.4      |
+| CloudNativePG                     | 1.30.1, operator namespace `cnpg-system`          |
+| Postgres                          | 18.7, three instances in namespace `database-lab` |
+| Postgres group / probe database   | `shortlink-lab` / `shortlink_lab`                 |
+| Real-data migration database      | `shortener`, matching the source locale           |
+| Storage                           | One five-GiB node-local PVC per instance          |
 
 All image references include registry digests in
 [`versions.json`](../deploy/db-lab/versions.json),
@@ -147,9 +149,9 @@ port-forward and client afterward. It reads only the new lab's app password and
 CA into memory and does not save Secret objects or decoded credentials.
 
 **This verifies Mac-to-database connectivity, not application-VM-to-database-VM
-routing.** No permanent database port, public database endpoint or application
-connection change is introduced. Cross-VM routing, endpoint naming and TLS
-configuration remain a separate migration increment.
+routing.** That checker introduces no permanent database port or application
+connection change. The later [cross-VM connectivity increment](database-connectivity.md)
+provides a separate private endpoint with verified TLS.
 
 ## What the check proves
 
@@ -174,14 +176,15 @@ still uses its original database.
 
 [Logical replication preparation](database-replication.md) has also passed a
 disposable fixture rehearsal against a separate temporary database in this tier.
-That database and its subscription were removed; real links remain on the source. The
-[source maintenance bundle](source-maintenance.md) has now enabled the reverse
-TLS path and shared subscriber credentials. No live migration stream has started.
+That temporary database and subscription were removed. After
+[source maintenance](source-maintenance.md), the [real-data increment](database-replication-live.md)
+created `shortener` and its ongoing logical subscription. This tier now holds
+real copied links as well as disposable probe data.
 
-No database backups, WAL archive, source replication stream, Grafana integration
-or off-host durability policy is configured for this disposable tier yet. The
-original source backup remains on the Mac. Do not use this lab as the sole home
-of real links before those migration and recovery checkpoints pass.
+Destination backups, WAL archive, database Grafana integration and an off-host
+durability policy are not qualified yet. The original source backup remains on
+the Mac. The old source remains authoritative until recovery and writer-handoff
+checkpoints pass.
 
 ## Planned primary switchover
 
@@ -189,7 +192,10 @@ of real links before those migration and recovery checkpoints pass.
 pnpm test:db-switchover
 ```
 
-Run this only against the disposable lab, with no concurrent database maintenance.
+The recorded test ran while this tier contained only disposable data. It now
+also hosts the real migration subscriber: do not treat another switchover as a
+fixture-only action. Subscriber continuity across promotion is a separate
+qualification, and no concurrent database maintenance should run.
 It selects a healthy standby and asks the pinned CloudNativePG CLI to promote it.
 The new primary remains primary afterward; the test does not automatically switch
 back. It never stops workers or changes replication/shutdown settings.

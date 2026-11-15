@@ -2,7 +2,7 @@
 
 [Project overview](../README.md) · [Current Kubernetes setup](kubernetes.md)
 
-**Status: planned; not implemented or validated.** Recorded November 14, 2026.
+**Status: in progress; initial real-data replication verified November 15, 2026.**
 This document preserves the agreed direction, intended end state, learning goals
 and unresolved decisions. It is not an executable runbook or evidence that HA
 or a zero-downtime migration already works. Update it as each increment is
@@ -10,7 +10,7 @@ reviewed, and record measured results separately.
 
 The [initial capacity inventory](experiments/ha-capacity-planning.md) was
 completed on November 14, 2026. It proposes profile budgets and a first-phase
-worker-failure topology; no VM or cluster changes have been made.
+worker-failure topology; provisioning and source maintenance followed later.
 The [backup/restore rehearsal](experiments/backup-restore.md) subsequently passed
 twice; the [procedure](database-recovery.md) and command are available for reuse.
 The single planned source interruption was [used on November 15](experiments/source-maintenance.md)
@@ -19,7 +19,7 @@ The [CloudNativePG lab](database-ha-lab.md) is now provisioned with disposable
 data and verified healthy synchronous replication. The user selected one required
 synchronous standby. Its [bootstrap report](experiments/cloudnativepg-bootstrap.md)
 records the failed six-GiB host gate and the approved four-GiB database profile;
-full overlap capacity, failover and real-data migration remain unverified.
+full overlap capacity, unexpected failover and live writer handoff remain unverified.
 A [planned switchover trial](experiments/database-switchover.md) subsequently
 preserved all 517 acknowledged test writes and recovered client access, with
 multi-second connection interruptions. Unexpected failover and zero-error
@@ -29,13 +29,16 @@ recovery; no timing or durability settings were tuned.
 [Private cross-VM connectivity](database-connectivity.md) is now implemented and
 verified with a temporary client in the existing application cluster, including
 TLS identity/authentication and fixture replay. Fastify still uses its old
-database; real-data replication and writer cutover have not begun.
+database; writer cutover has not begun.
 [Logical replication preparation](database-replication.md) now includes a live
 object/settings inventory, dry-run source patch and passing disposable cross-VM
 initial-copy/change-stream rehearsals. [Source maintenance](source-maintenance.md) subsequently completed: the
 application VM is six CPUs/six GiB, the source has logical WAL/TLS and the reverse
-endpoint is verified. No real-data publication/subscription has started; the old
-source remains the only application writer.
+endpoint is verified. The [initial copy and live stream](database-replication-live.md)
+subsequently passed: 7,764 original links plus eight concurrent-copy test links
+matched on the new primary and both standbys. The old source remains the only
+application writer. Next rehearse writer handoff on disposable data before
+implementing live creation gating, idempotency and pool coordination.
 
 ## Purpose and goals
 
@@ -84,8 +87,10 @@ image loading and context assumptions in deployment tooling.
 
 Use two Colima profiles, each representing a separate VM. Keep the existing
 application profile and create a dedicated database profile. The database
-profile name, resource allocations, cluster names and network endpoints remain
-to be chosen; existing resources must not be renamed or recreated implicitly.
+profile is `shortlink-db` with its own kind cluster and verified private endpoints.
+The application VM is six CPUs/six GiB and database VM four/four; replacement
+application-cluster capacity remains to be qualified. Existing resources must
+not be renamed or recreated implicitly.
 
 ```mermaid
 flowchart TB
@@ -230,7 +235,8 @@ replication and failover behavior understood using disposable data.
 Use native PostgreSQL logical replication as the source-to-destination approach,
 with explicit publication tables and one subscription. The [preparation and
 fixture rehearsal](database-replication.md) validate the approach on our current
-versions; the live stream is not started. Physical replication within the new HA
+versions; the [real-data stream](database-replication-live.md) is now active.
+Physical replication within the new HA
 tier is a separate mechanism from this initial migration stream.
 
 Keep the existing database as the only application writer. Copy the schema and

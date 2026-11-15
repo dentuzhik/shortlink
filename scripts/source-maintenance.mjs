@@ -199,8 +199,7 @@ async function checkRemote() {
         !value.superuser &&
         value.replication &&
         !value.canInsert &&
-        value.wal_level === "logical" &&
-        value.slots === 0,
+        value.wal_level === "logical",
       "Unexpected remote publisher session",
     );
     const permission = (
