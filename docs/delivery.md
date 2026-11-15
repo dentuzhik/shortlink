@@ -269,5 +269,12 @@ the ServiceAccount/runtime environment in the same pod-template patch as the
 new immutable image. The selected commit must include runtime database support.
 The source remains selected and creation enabled during this preparatory rollout.
 Use the [steady-load rollout test](performance.md#test-a-versioned-fastify-rollout)
-to exercise the deployment at 1,000 redirects/s and ten creations/s. No such
-rollout of the new pool code has run yet.
+to exercise the deployment at 1,000 redirects/s and ten creations/s. The
+[November 15 results](experiments/fastify-runtime-rollout.md) include the initial
+cold-node pull deadline failure and the passing staged-image repeat.
+
+`pnpm image:stage FULL_GIT_SHA` validates the published image and stages its native
+digest in the current kind node without changing the Deployment. The registry
+rollout test runs this before baseline. A failed rollout deadline remains a
+failure, while the runner now retains a complete scheduled client trial and
+allows summary export before forced cleanup.

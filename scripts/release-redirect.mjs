@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { shortLinkOrigin } from "../apps/web/lib/runtime-config.ts";
 import {
   assertSourceConfiguration,
+  assertStagedDigest,
   runtimePodSpec,
 } from "./lib/fastify-rollout.mjs";
 import { platformDigest, verifyImageMetadata } from "./lib/published-image.mjs";
@@ -48,14 +49,16 @@ if (
   throw new Error("--runtime-control applies only to Fastify deployment");
 }
 if (
-  !["build", "deploy", "deploy-local", "rollback", "status"].includes(action) ||
+  !["build", "stage", "deploy", "deploy-local", "rollback", "status"].includes(
+    action,
+  ) ||
   extra.length
 )
   throw new Error(
-    "Usage: release-redirect.mjs [web] build|deploy|deploy-local [git-commit] | rollback [kubernetes-revision] | status",
+    "Usage: release-redirect.mjs [web] build|stage|deploy|deploy-local [git-commit] | rollback [kubernetes-revision] | status",
   );
 
-if (target === "web" && ["build", "deploy-local"].includes(action))
+if (target === "web" && ["build", "stage", "deploy-local"].includes(action))
   throw new Error(
     "UI releases use published images; use k8s:up for local development builds",
   );
@@ -375,7 +378,32 @@ if (action === "status") {
   await mkdir(directory, { recursive: true });
   const report = { target, action, argument, directory, startedAt: Date.now() };
   try {
-    if (action === "build") {
+    if (action === "stage") {
+      process.env.DOCKER_CONTEXT = "colima";
+      report.release = await published(argument);
+      await run("docker", [
+        "--context",
+        "colima",
+        "exec",
+        "shortlink-control-plane",
+        "crictl",
+        "pull",
+        report.release.image,
+      ]);
+      const staged = JSON.parse(
+        await output("docker", [
+          "--context",
+          "colima",
+          "exec",
+          "shortlink-control-plane",
+          "crictl",
+          "inspecti",
+          report.release.image,
+        ]),
+      );
+      assertStagedDigest(staged, report.release.digest);
+      report.stagedRepoDigests = staged.status.repoDigests;
+    } else if (action === "build") {
       report.release = await build(argument);
     } else {
       const deployment = await kubeJson(

@@ -130,7 +130,7 @@ real slot or the persistent monitor, and removes its fixtures afterward.
 ## Next checkpoint: rehearse writer handoff
 
 [Runtime maintenance control](runtime-maintenance.md) now implements the creation
-gate and per-pod observations, tested without a live rollout. The user is
+gate and per-pod observations, deployed in the verified source-only rollout. The user is
 considering explicit creation rejection during the transfer instead of queued
 HTTP requests; no live cutover or final window budget is agreed.
 
@@ -147,7 +147,7 @@ This is increased creation latency if waiting requests succeed within the agreed
 limit; timeouts or rejected requests are partial unavailability. Measure the
 handoff before choosing a creation latency/waiting budget. The runtime gate now
 provides multi-replica creation admission control. [Pool switching](database-pool-switching.md)
-is also implemented and tested for review, with no live rollout. Idempotency and
+is now deployed in image `cfd1d5f`, with source still selected. Idempotency and
 safe handling of ambiguous write outcomes remain future work. The final mechanism
 still needs design and tests; a DNS change does not retarget existing connections.
 

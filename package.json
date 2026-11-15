@@ -67,7 +67,8 @@
     "test:maintenance:k8s": "pnpm --filter @url-shortener/redirect-service... build && node scripts/test-runtime-maintenance.mjs",
     "maintenance:prepare": "node scripts/runtime-maintenance.mjs prepare",
     "maintenance:switch": "node scripts/runtime-maintenance.mjs switch",
-    "test:fastify-rollout": "node scripts/test-rolling-restart.mjs --deploy"
+    "test:fastify-rollout": "node scripts/test-rolling-restart.mjs --deploy",
+    "image:stage": "node scripts/release-redirect.mjs stage"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

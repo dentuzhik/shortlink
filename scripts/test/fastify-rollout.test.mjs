@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   assertSourceConfiguration,
   assertSourcePods,
+  assertStagedDigest,
   fastifyRolloutPlan,
   runtimePodSpec,
 } from "../lib/fastify-rollout.mjs";
@@ -83,5 +84,28 @@ test("replacement replicas must acknowledge the active source pool, not merely b
   );
   assert.throws(() =>
     assertSourcePods([good, { ...good, database: { activeDatabase: "ha" } }]),
+  );
+});
+
+test("staging checks the node's manifest digest, rather than a Docker cache or config ID", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  assert.doesNotThrow(() =>
+    assertStagedDigest(
+      { status: { repoDigests: [`ghcr.io/example/api@${digest}`] } },
+      digest,
+    ),
+  );
+  assert.throws(() =>
+    assertStagedDigest({ status: { id: digest, repoDigests: [] } }, digest),
+  );
+  assert.throws(() =>
+    assertStagedDigest(
+      {
+        status: {
+          repoDigests: [`ghcr.io/example/api@sha256:${"b".repeat(64)}`],
+        },
+      },
+      digest,
+    ),
   );
 });

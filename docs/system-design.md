@@ -58,7 +58,7 @@ from readiness: replicas can reject REST/GraphQL creation while continuing to
 serve redirects. Versioned configuration, per-pod status and application drain
 counts let an operator wait for acknowledged transitions. Startup and known
 control failures close creation admission. This is implemented and tested for
-review, not yet rolled out to the live app, and does not replace database fencing.
+the live app in image `cfd1d5f` and does not replace database fencing.
 
 ## Prepared pools and operation draining
 
@@ -66,8 +66,8 @@ The [pool manager](database-pool-switching.md) prepares a candidate without movi
 traffic, then changes the active generation during drained creation maintenance.
 Existing reads finish on their captured pool, while subsequent lookups, readiness
 and pool metrics use the new one. Cache coalescing also follows the generation.
-Tests verify this on two disposable databases; live rollout and writer fencing
-remain later steps.
+Tests verify this on two disposable databases. The [live source-only rollout](experiments/fastify-runtime-rollout.md)
+now passes the local staged-image target; database writer fencing remains a later step.
 
 ## Controlled maintenance boundary and subscriber credentials
 

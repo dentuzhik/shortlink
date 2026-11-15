@@ -2,11 +2,9 @@
 
 [Migration plan](ha-migration.md) · [Live replication](database-replication-live.md)
 
-**Status:** implemented and tested for review. The live Fastify Deployment has
-not been changed. This increment controls creation admission only; it does not
-fence database writers or perform a cutover. The subsequent
-[pool-switching increment](database-pool-switching.md) adds runtime pool selection
-and remains uncommitted for review.
+**Status:** deployed with [pool switching](database-pool-switching.md) in image
+`cfd1d5f`, with source selected and creation enabled. The [steady-load rollout](experiments/fastify-runtime-rollout.md)
+passed after staging the node image. No database writer cutover has happened.
 
 ## Configuration and behavior
 
@@ -84,9 +82,10 @@ also does not block direct SQL, migration Jobs or old software without the gate.
 
 ## One-time preparation and operation
 
-A preparatory rollout must install the new code, ConfigMap, ServiceAccount/RBAC
-and pod environment wiring before these commands can be used. This increment
-has not performed that rollout against the live app.
+The preparatory rollout installed the new code, ConfigMap, ServiceAccount/RBAC
+and pod environment wiring. Both replicas acknowledged revision 1 with creation
+enabled and source selected. The maintenance commands are now available; the
+rollout trial did not intentionally close the creation gate.
 
 Fresh local Kubernetes startup applies
 [runtime permissions](../deploy/k8s/runtime-maintenance.yaml) and creates the

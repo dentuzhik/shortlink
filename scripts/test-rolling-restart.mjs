@@ -51,6 +51,7 @@ if (
   );
 }
 
+let imagePreparation;
 if (plan.action !== "restart") {
   const maps = JSON.parse(await kube("get", "configmaps", "-o", "json")).items;
   const control = maps.find((map) => map.metadata.name === "shortlink-runtime");
@@ -64,6 +65,21 @@ if (plan.action !== "restart") {
     throw new Error(
       "Select a different image revision for a versioned rollout test",
     );
+  if (plan.action === "deploy") {
+    const startedAt = Date.now();
+    const prepared = await execute(
+      "node",
+      ["scripts/release-redirect.mjs", "stage", plan.revision],
+      { timeout: 180000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    imagePreparation = {
+      startedAt,
+      finishedAt: Date.now(),
+      mode: "published image staged in kind node",
+      log: prepared.stdout,
+    };
+    process.stdout.write(prepared.stdout);
+  }
   if (plan.action === "deploy-local") {
     // Build before starting load; the deployment command will reuse the SHA image.
     const prepared = await execute(
@@ -80,6 +96,7 @@ await mkdir(runDir, { recursive: true });
 const report = {
   createdAt: Date.now(),
   operation: plan,
+  imagePreparation,
   runDir,
   rate: redirectRate,
   createRate,
@@ -376,9 +393,8 @@ try {
     );
     assertSourcePods(report.runtimeStatus);
   }
-  if (report.rolloutCompletedAt >= report.startedAt + 60_000) {
-    throw new Error("Rollout exceeded the 40-second restart window");
-  }
+  report.rolloutWithinWindow =
+    report.rolloutCompletedAt < report.startedAt + 60_000;
   report.k6Exit = await exited;
   if (report.k6Exit.code !== 0)
     throw new Error("k6 failed; inspect thresholds");
@@ -431,6 +447,8 @@ try {
         "An acknowledged creation is missing or has a different destination in source Postgres",
       );
   }
+  if (!report.rolloutWithinWindow)
+    throw new Error("Rollout exceeded the 40-second restart window");
   report.passed = true;
 } catch (error) {
   report.passed = false;
@@ -440,9 +458,23 @@ try {
 } finally {
   clearTimeout(startTimeout);
   if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGINT");
-    if (!nativeRunner) {
-      await execute("docker", ["rm", "-f", containerName]).catch(() => {});
+    if (nativeRunner) child.kill("SIGINT");
+    else
+      await execute("docker", ["kill", "--signal=SIGINT", containerName]).catch(
+        () => {},
+      );
+    // Give k6 time to export summaries before resorting to forced cleanup.
+    let stopTimer;
+    await Promise.race([
+      exited.catch(() => {}),
+      new Promise((resolve) => {
+        stopTimer = setTimeout(resolve, 10000);
+      }),
+    ]);
+    clearTimeout(stopTimer);
+    if (child.exitCode === null && child.signalCode === null) {
+      if (nativeRunner) child.kill("SIGKILL");
+      else await execute("docker", ["rm", "-f", containerName]).catch(() => {});
     }
   }
   report.k6Exit = await exited.catch((error) => ({ error: error.message }));

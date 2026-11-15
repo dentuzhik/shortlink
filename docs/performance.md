@@ -49,14 +49,16 @@ RATE=1000 CREATE_RATE=10 pnpm test:fastify-rollout FULL_GIT_SHA
 RATE=1000 CREATE_RATE=10 node scripts/test-rolling-restart.mjs --deploy-local FULL_GIT_SHA
 ```
 
-This is a real deployment operation, not an inspection command. It has not yet
-been executed for the pool-switching image. Docker context is explicitly Colima;
+This is a real deployment operation, not an inspection command. The
+[November 15 trial](experiments/fastify-runtime-rollout.md) records a cold-pull
+deadline failure followed by a passing staged-image repeat. Docker context is explicitly Colima;
 Kubernetes remains the existing kind-shortlink context and shortlink namespace.
 
 The existing 90-second workload continues: 20 seconds baseline, a 40-second
-rollout window, then 30 seconds after. Local image building happens before load;
-registry resolution/pulling and deployment verification occur in the rollout
-window. A deployment that misses the window fails rather than silently changing
+rollout window, then 30 seconds after. Registry deployments now stage and verify
+the native image in the current kind node before load; Docker's cache alone is
+insufficient. Local image building also happens before load. Registry verification
+and pod replacement occur in the rollout window. A deployment that misses the window fails rather than silently changing
 phase boundaries. Passing requires zero request failures/dropped starts, correct
 creations and at least 99% correct redirects within 100 ms separately in each
 phase. Each creation also immediately verifies its redirect, adding ten probe

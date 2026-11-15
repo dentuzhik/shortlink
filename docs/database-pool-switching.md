@@ -2,9 +2,10 @@
 
 [Runtime maintenance](runtime-maintenance.md) · [Migration plan](ha-migration.md)
 
-**Status:** implemented and tested for review; not deployed to live Fastify.
-The maintenance checkpoint is committed as `3b725db`. The pool changes remain a
-new reviewable diff. The old source is still the sole live application database.
+**Status:** committed/published as `cfd1d5f` and deployed on November 15, 2026.
+The [staged-image rollout trial](experiments/fastify-runtime-rollout.md) passed at
+1,000 redirects/s plus ten creations/s after a preserved cold-pull deadline
+failure. The old source is still the sole live application database.
 
 ## Pool generations and preparation
 
@@ -99,10 +100,11 @@ Secret and its path supplied through the environment. No credential-bearing URL
 is put in the control ConfigMap or status endpoint. Explicit TLS settings reject
 competing SSL connection-string parameters that could override verification.
 
-This increment does not create/copy the live HA application Secret or point any
-live pool at that tier. One preparatory rollout will install code and runtime
-ConfigMap/RBAC while keeping all reads/writes on source. After that, maintenance
-and pool-selection changes can happen without pod replacement. After the HA tier
+The preparatory rollout installed code and runtime ConfigMap/RBAC while keeping
+all reads/writes on source. It did not create/copy the live HA application Secret
+or point a pool at that tier. HA credentials/trust must be staged in advance;
+with connection targets available, maintenance and pool selection can change
+without pod replacement. After the HA tier
 accepts application writes, image rollback must retain HA selection and use
 runtime-capable code. An older image that ignores the ConfigMap could otherwise
 read the stale source; returning to it is not a qualified database rollback.
@@ -111,6 +113,21 @@ Startup readiness waits for both initial database configuration and the first
 successful ConfigMap watch handshake. Receiving a GET snapshot alone does not
 route traffic to a pod whose startup creation gate is still closed. After initial
 synchronization, known control failures can leave reads ready while writes close.
+
+## Next checkpoint: prepare the real HA connection target
+
+The runtime code is live, but the real HA URL, credentials and CA have not been
+installed in Fastify. Stage those through Secrets and a certificate mount, then
+perform a preparatory rolling update with source still selected and creation
+enabled. This additional preparation is required because the current server reads
+connection credentials and trust at startup. The later maintenance/pool switch
+can then use configuration changes without replacing pods.
+
+Run `maintenance:prepare ha` and require every replica to report source active,
+HA prepared, candidate ready and the full configuration revision applied. This
+validates the actual application-to-HA TLS path and database/role/schema checks
+without selecting HA for requests or inserting links there. Recovery qualification
+and a full writer-handoff rehearsal still precede the real cutover.
 
 ## Redis and old operations
 
@@ -137,9 +154,9 @@ superuser and an unreachable target all leave the source serving. Fixture TLS
 requirements are explicit; these databases are not the real CNPG subscriber.
 
 The [preparatory rollout test](performance.md#test-a-versioned-fastify-rollout)
-is prepared for 1,000 redirects/s plus ten creations/s. It has not yet run against
-the new image. No service latency, real writer-cutover or failover guarantee is
-claimed from these fixture tests.
+has now passed with the published image under 1,000 redirects/s plus ten
+creations/s; see [both attempts and limits](experiments/fastify-runtime-rollout.md).
+That local staged-image result does not qualify real writer cutover or failover.
 
 Local checks on November 15, 2026 passed 51 Fastify unit tests, 21 Postgres/Redis
 integration tests and 23 tooling tests. Workspace type checks and lint passed.

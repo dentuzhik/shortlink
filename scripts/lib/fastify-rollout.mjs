@@ -73,3 +73,15 @@ export function assertSourcePods(pods) {
     );
   }
 }
+
+export function assertStagedDigest(image, digest) {
+  if (
+    !image.status?.repoDigests?.some((reference) =>
+      reference.endsWith(`@${digest}`),
+    )
+  ) {
+    throw new Error(
+      "The kind node does not have the expected published platform digest",
+    );
+  }
+}
