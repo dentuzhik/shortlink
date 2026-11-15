@@ -644,7 +644,13 @@ describe("links with Postgres", () => {
           await lockTarget.query(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND application_name='redirect-service'",
           );
-          expect((await instance.inject("/readyz")).statusCode).toBe(200); // A replacement HA connection is usable.
+          // Termination is delivered asynchronously: an immediate checkout can
+          // still receive the dying connection. Require bounded recovery onto HA.
+          await vi.waitFor(
+            async () =>
+              expect((await instance.inject("/readyz")).statusCode).toBe(200),
+            { interval: 5, timeout: 2000 },
+          );
         } finally {
           await lockTarget.end();
         }

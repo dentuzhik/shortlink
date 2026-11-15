@@ -97,8 +97,10 @@ An error leaves the requested state for inspection instead of undoing a switch.
 
 Source uses the existing DATABASE_URL. Production HA configuration is loaded
 before startup from HA_DATABASE_URL, HA_DATABASE_CA_FILE and
-HA_DATABASE_SERVERNAME. The HA identity is database `shortener`, role
-`shortlink_lab`. Credentials belong in a Secret; the CA can be mounted from a
+HA_DATABASE_SERVERNAME. The HA identity is database `shortener`; the expected
+role is read from the explicitly configured URL username. The dedicated runtime
+login is `shortlink_app`; earlier images hardcoded the owner `shortlink_lab`.
+Credentials belong in a Secret; the CA can be mounted from a
 Secret and its path supplied through the environment. No credential-bearing URL
 is put in the control ConfigMap or status endpoint. Explicit TLS settings reject
 competing SSL connection-string parameters that could override verification.
@@ -150,6 +152,12 @@ It uses explicit application/database kubeconfigs and validates the current
 source-only state before operating. The base application manifest does not
 require a database-lab Secret on fresh installations or in CI.
 
+The following commands describe the original owner-login preparation increment.
+Once `runtime-application-roles` exists, the legacy command refuses to run.
+Use [dedicated runtime roles](database-application-roles.md) for current staging,
+combined credential/image deployment and verification; this preserves the source
+selection and removes both owner logins from application pods.
+
 ```sh
 # Stage the immutable application URL/public CA Secret; no pod change.
 pnpm db:ha:target stage
@@ -190,8 +198,8 @@ Preparing a target is distinct from making it authoritative. Source continues
 handling all reads and writes, and its new commits continue replicating into
 HA. The [logical recovery qualification](experiments/ha-backup-restore.md) and
 [disposable handoff](experiments/database-handoff.md) have passed; the latter
-used a 25/2 workload. Dedicated source-role preparation and operating-load
-qualification remain open before real cutover. See the
+used a 25/2 workload. The dedicated-role deployment and operating-load
+qualification are separate gates before real cutover. See the
 [preparation trial](experiments/ha-target-preparation.md) for its separate
 measured results and remaining boundaries.
 
