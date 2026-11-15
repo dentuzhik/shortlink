@@ -5,7 +5,10 @@
 **Status:** committed/published as `cfd1d5f` and deployed on November 15, 2026.
 The [staged-image rollout trial](experiments/fastify-runtime-rollout.md) passed at
 1,000 redirects/s plus ten creations/s after a preserved cold-pull deadline
-failure. The old source is still the sole live application database.
+failure. The old source is still the sole selected application database. Both replicas
+now have a [validated HA candidate](experiments/ha-target-preparation.md); the
+associated full load trial failed its client thresholds, including baseline
+errors, and does not qualify a clean handoff under load.
 
 ## Pool generations and preparation
 
@@ -84,8 +87,8 @@ pnpm maintenance:end
 ```
 
 These are capabilities, not permission to skip the commented database steps.
-The current live target has not been provisioned in Fastify. The command checks
-all replicas, including terminating pods that may still serve requests. Prepare
+The command checks all replicas, including terminating pods that may still
+serve requests. Prepare
 can replace/cancel failed preparation; switch and reopen require full prior
 acknowledgement. Beginning/ending maintenance preserves database-selection fields.
 An error leaves the requested state for inspection instead of undoing a switch.
@@ -100,11 +103,11 @@ Secret and its path supplied through the environment. No credential-bearing URL
 is put in the control ConfigMap or status endpoint. Explicit TLS settings reject
 competing SSL connection-string parameters that could override verification.
 
-The preparatory rollout installed code and runtime ConfigMap/RBAC while keeping
+The initial preparatory rollout installed code and runtime ConfigMap/RBAC while keeping
 all reads/writes on source. It did not create/copy the live HA application Secret
-or point a pool at that tier. HA credentials/trust must be staged in advance;
-with connection targets available, maintenance and pool selection can change
-without pod replacement. After the HA tier
+or point a pool at that tier. The separate target-preparation procedure below
+installs those credentials/trust. Once the targets are available, maintenance
+and pool selection can change without pod replacement. After the HA tier
 accepts application writes, image rollback must retain HA selection and use
 runtime-capable code. An older image that ignores the ConfigMap could otherwise
 read the stale source; returning to it is not a qualified database rollback.
@@ -114,20 +117,80 @@ successful ConfigMap watch handshake. Receiving a GET snapshot alone does not
 route traffic to a pod whose startup creation gate is still closed. After initial
 synchronization, known control failures can leave reads ready while writes close.
 
-## Next checkpoint: prepare the real HA connection target
+## Why both a ConfigMap and a Secret?
 
-The runtime code is live, but the real HA URL, credentials and CA have not been
-installed in Fastify. Stage those through Secrets and a certificate mount, then
-perform a preparatory rolling update with source still selected and creation
-enabled. This additional preparation is required because the current server reads
-connection credentials and trust at startup. The later maintenance/pool switch
-can then use configuration changes without replacing pods.
+The runtime ConfigMap holds controls such as `creationMode`, `activeDatabase`
+and `prepareDatabase`. The Secret holds the credential-bearing connection URL
+and public CA. Fastify's service account can get/watch only the named runtime
+ConfigMap; it has no Secret-read permission through the Kubernetes API. The
+kubelet supplies the explicitly referenced Secret values when starting the
+container: the URL becomes an environment variable and the CA becomes a file.
+The certificate is public; it shares the Secret for convenient target packaging.
 
-Run `maintenance:prepare ha` and require every replica to report source active,
-HA prepared, candidate ready and the full configuration revision applied. This
-validates the actual application-to-HA TLS path and database/role/schema checks
-without selecting HA for requests or inserting links there. Recovery qualification
-and a full writer-handoff rehearsal still precede the real cutover.
+The ConfigMap tells Fastify which configured pool to use. It does not teach the
+watcher how to load arbitrary connection settings. Changing an environment
+variable in Kubernetes does not replace the running process's environment, and
+this server reads its CA once at startup. Hot credential rotation would need
+separate watcher/file-reload, validation, pool replacement and draining logic.
+Secret selection and runtime database selection are separate concerns.
+
+ConfigMaps are intended for nonconfidential values. Secrets support separate
+access controls and credential delivery, but base64 encoding is not encryption;
+cluster encryption at rest is a separate configuration. See upstream
+[ConfigMaps](https://kubernetes.io/docs/concepts/configuration/configmap/) and
+[Secrets](https://kubernetes.io/docs/concepts/configuration/secret/).
+
+## Prepare the real HA connection target
+
+The optional [target wiring](../deploy/migration/fastify-ha-target.json) adds only
+HA environment references and a public-CA mount to the existing Fastify
+Deployment. The [operator command](../scripts/prepare-ha-target.mjs) retains its
+image, source credentials/endpoint, runtime control, resource and drain settings.
+It uses explicit application/database kubeconfigs and validates the current
+source-only state before operating. The base application manifest does not
+require a database-lab Secret on fresh installations or in CI.
+
+```sh
+# Stage the immutable application URL/public CA Secret; no pod change.
+pnpm db:ha:target stage
+# Replace pods with the same image under the existing 1,000/10 workload,
+# then run maintenance:prepare ha and verify both candidates.
+pnpm test:ha-target-rollout
+# Read-only repeat validation after successful preparation:
+pnpm db:ha:target verify
+```
+
+The load-test command also performs the staging step if needed. An equivalent
+rollout without load is `pnpm db:ha:target rollout`; it changes the Deployment,
+waits for old pods to leave, then prepares HA. These commands never call
+`maintenance:begin`, `maintenance:switch` or `maintenance:end`.
+
+The application-namespace Secret `fastify-ha-target` contains only the encoded
+connection URL for database `shortener` and role `shortlink_lab`, plus `ca.crt`.
+The server name is `db-lab-primary.shortlink.svc.cluster.local`; the existing
+private cross-VM Service/bridge routes it to CNPG's current primary. Passwords
+are URL-escaped, and the URL has no parameters that can override explicit TLS
+verification. Only the public certificate is mounted; the CA private key stays
+in the database cluster. Secret data travels through Kubernetes stdin, not
+shell arguments or evidence files. This exercise uses an immutable Secret;
+a changed password or CA stops restaging and requires an explicit rotation
+increment rather than changing the trust of running pools.
+
+Credentials and CA are loaded when Fastify starts, so staging requires one
+preparatory rolling update. Future candidate preparation and the eventual pool
+selection can then use ConfigMap changes without replacing pods. Preparation
+keeps `creationMode: accept` and `activeDatabase: source`, adds
+`prepareDatabase: ha` and advances the control revision. Every replica must
+report source active, HA prepared, candidate ready and that revision fully
+applied. Read-only validation checks database/role identity, TLS, primary state,
+privileges and the expected schema. It does not insert links or advance identity
+sequences. The primary should show one idle TLS candidate session per replica.
+
+Preparing a target is distinct from making it authoritative. Source continues
+handling all reads and writes, and its new commits continue replicating into
+HA. Recovery qualification and a full writer-handoff rehearsal still precede
+the real cutover. See the [preparation trial](experiments/ha-target-preparation.md)
+for measured results and remaining boundaries.
 
 ## Redis and old operations
 

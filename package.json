@@ -68,7 +68,9 @@
     "maintenance:prepare": "node scripts/runtime-maintenance.mjs prepare",
     "maintenance:switch": "node scripts/runtime-maintenance.mjs switch",
     "test:fastify-rollout": "node scripts/test-rolling-restart.mjs --deploy",
-    "image:stage": "node scripts/release-redirect.mjs stage"
+    "image:stage": "node scripts/release-redirect.mjs stage",
+    "db:ha:target": "node scripts/prepare-ha-target.mjs",
+    "test:ha-target-rollout": "node scripts/test-rolling-restart.mjs --prepare-ha-target"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

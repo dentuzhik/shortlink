@@ -1,0 +1,31 @@
+{
+  "env": [
+    {
+      "name": "HA_DATABASE_URL",
+      "valueFrom": {
+        "secretKeyRef": { "name": "fastify-ha-target", "key": "url" }
+      }
+    },
+    {
+      "name": "HA_DATABASE_CA_FILE",
+      "value": "/etc/shortlink/ha-database/ca.crt"
+    },
+    {
+      "name": "HA_DATABASE_SERVERNAME",
+      "value": "db-lab-primary.shortlink.svc.cluster.local"
+    }
+  ],
+  "volumeMount": {
+    "name": "ha-database-trust",
+    "mountPath": "/etc/shortlink/ha-database",
+    "readOnly": true
+  },
+  "volume": {
+    "name": "ha-database-trust",
+    "secret": {
+      "secretName": "fastify-ha-target",
+      "defaultMode": 292,
+      "items": [{ "key": "ca.crt", "path": "ca.crt" }]
+    }
+  }
+}

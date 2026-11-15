@@ -79,6 +79,26 @@ pod/endpoint timeline, deployment output, per-pod logs and client results remain
 under .kind/rolling-restart/. Creation latency is reported, with no newly invented
 creation latency threshold.
 
+## Test HA target preparation
+
+```sh
+RATE=1000 CREATE_RATE=10 pnpm test:ha-target-rollout
+```
+
+This reuses the same 90-second workload and phase thresholds. It stages the HA
+Secret before load, then at 20 seconds patches only Fastify's HA environment and
+CA mount using the already deployed image. It waits for both old pods to leave,
+prepares the HA candidate through the runtime ConfigMap and checks every
+replica's acknowledgement. Source remains selected and creations stay enabled.
+The combined rollout/preparation/verification must finish inside the existing
+40-second window. A ready Deployment alone is insufficient to pass.
+
+It starts with two stable, source-only replicas and no candidate; repeating an
+already completed preparation requires an explicit reviewed reset. Use
+`pnpm db:ha:target verify` for subsequent read-only checks. See the
+[connection procedure](database-pool-switching.md#prepare-the-real-ha-connection-target)
+and [measured trial](experiments/ha-target-preparation.md).
+
 ## Test a Fastify rolling restart
 
 With two healthy Fastify replicas in the running Kubernetes stack:

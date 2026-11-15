@@ -9,6 +9,8 @@ import {
   fastifyRolloutPlan,
 } from "./lib/fastify-rollout.mjs";
 
+import { assertSourceStatus } from "./lib/ha-target.mjs";
+
 const execute = promisify(execFile);
 const plan = fastifyRolloutPlan(process.argv.slice(2));
 process.env.DOCKER_CONTEXT = "colima";
@@ -52,7 +54,19 @@ if (
 }
 
 let imagePreparation;
-if (plan.action !== "restart") {
+if (plan.action === "ha-target") {
+  const staged = await execute(
+    "node",
+    ["scripts/prepare-ha-target.mjs", "stage"],
+    { timeout: 45000 },
+  );
+  imagePreparation = {
+    mode: "HA credentials staged; same image",
+    log: staged.stdout,
+  };
+  process.stdout.write(staged.stdout);
+}
+if (["deploy", "deploy-local"].includes(plan.action)) {
   const maps = JSON.parse(await kube("get", "configmaps", "-o", "json")).items;
   const control = maps.find((map) => map.metadata.name === "shortlink-runtime");
   if (control)
@@ -346,7 +360,15 @@ try {
   console.log(`Requesting Fastify ${plan.action}; k6 traffic continues.`);
   if (plan.action === "restart")
     await kube("rollout", "restart", "deployment/redirect-service");
-  else {
+  else if (plan.action === "ha-target") {
+    const prepared = await execute(
+      "node",
+      ["scripts/prepare-ha-target.mjs", "rollout"],
+      { timeout: 150000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    await writeFile(`${runDir}/ha-target.log`, prepared.stdout);
+    process.stdout.write(prepared.stdout);
+  } else {
     const released = await execute(
       "node",
       [
@@ -387,7 +409,8 @@ try {
         })
       ).stdout,
     );
-    assertSourceConfiguration(result.desired);
+    if (plan.action === "ha-target") assertSourceStatus(result, true);
+    else assertSourceConfiguration(result.desired);
     report.runtimeStatus = result.pods.filter((pod) =>
       report.replacementPods.includes(pod.pod),
     );

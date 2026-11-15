@@ -41,9 +41,13 @@ application writer. [Runtime creation maintenance](runtime-maintenance.md) is no
 deployed and verified in the [steady-load image rollout](experiments/fastify-runtime-rollout.md), with source selected. It supports explicit
 creation rejection during maintenance; no final maintenance-window budget or
 live handoff has been qualified. [Pool switching](database-pool-switching.md) is now deployed after fixture tests
-and a passing staged-image rollout under load. Database fencing, HA application
-credential preparation and safe handling of ambiguous write outcomes remain
-separate increments; the source remains authoritative.
+and a passing staged-image rollout under load. The real HA application
+[connection target](experiments/ha-target-preparation.md) is now staged and
+validated by both Fastify replicas; source remains selected. Its full rollout
+load trial failed client thresholds, including baseline errors, and is not a
+clean load qualification. Database fencing, destination recovery qualification
+and safe handling of ambiguous write outcomes remain separate increments; the
+source remains authoritative.
 
 ## Purpose and goals
 

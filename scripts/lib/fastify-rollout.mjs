@@ -1,12 +1,14 @@
 export function fastifyRolloutPlan(args) {
   if (args.length === 0) return { action: "restart" };
+  if (args.length === 1 && args[0] === "--prepare-ha-target")
+    return { action: "ha-target" };
   if (
     args.length !== 2 ||
     !["--deploy", "--deploy-local"].includes(args[0]) ||
     !/^[a-f0-9]{40}$/.test(args[1])
   ) {
     throw new Error(
-      "Use test-rolling-restart.mjs [--deploy|--deploy-local FULL_GIT_SHA]",
+      "Use test-rolling-restart.mjs [--deploy|--deploy-local FULL_GIT_SHA | --prepare-ha-target]",
     );
   }
   return {
