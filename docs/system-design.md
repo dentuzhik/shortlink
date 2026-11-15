@@ -51,6 +51,15 @@ on the new primary and both standbys. A source-side periodic check watches slot
 retention and filesystem headroom. Schema/roles/sequences still require explicit
 handling, and no application cutover or zero-downtime migration is claimed.
 
+## Runtime write admission and revision acknowledgements
+
+[Runtime maintenance control](runtime-maintenance.md) separates creation admission
+from readiness: replicas can reject REST/GraphQL creation while continuing to
+serve redirects. Versioned configuration, per-pod status and application drain
+counts let an operator wait for acknowledged transitions. Startup and known
+control failures close creation admission. This is implemented and tested for
+review, not yet rolled out to the live app, and does not replace database fencing.
+
 ## Controlled maintenance boundary and subscriber credentials
 
 The [source maintenance bundle](source-maintenance.md) closes one public bridge

@@ -129,6 +129,11 @@ real slot or the persistent monitor, and removes its fixtures afterward.
 
 ## Next checkpoint: rehearse writer handoff
 
+[Runtime maintenance control](runtime-maintenance.md) now implements the creation
+gate and per-pod observations, tested without a live rollout. The user is
+considering explicit creation rejection during the transfer instead of queued
+HTTP requests; no live cutover or final window budget is agreed.
+
 Use disposable publisher/subscriber data and steady test writes to rehearse:
 hold new creation requests with bounded waiting, finish in-flight writes, fence
 all old writers, establish and verify a final published-data barrier, correct
@@ -140,9 +145,9 @@ both databases contain the same finalized data and application writes are held.
 
 This is increased creation latency if waiting requests succeed within the agreed
 limit; timeouts or rejected requests are partial unavailability. Measure the
-handoff before choosing a creation latency/waiting budget. Our current startup
-pool and graceful shutdown do not implement a coordinated multi-replica gate,
-hot pool handoff or idempotency for ambiguous write outcomes. The final mechanism
+handoff before choosing a creation latency/waiting budget. The runtime gate now
+provides multi-replica creation admission control; the startup pool and graceful shutdown still do not implement hot pool handoff or
+idempotency for ambiguous write outcomes. The final mechanism
 still needs design and tests; a DNS change does not retarget existing connections.
 
 Reading the destination before write cutover is possible, but asynchronous lag

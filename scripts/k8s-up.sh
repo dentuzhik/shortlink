@@ -52,6 +52,11 @@ existing_apps=false
 if kube get deployment redirect-service web >/dev/null 2>&1; then
   existing_apps=true
 fi
+kube apply -f deploy/k8s/runtime-maintenance.yaml
+# Create the initial control object once; never overwrite a live maintenance gate.
+if ! kube get configmap shortlink-runtime >/dev/null 2>&1; then
+  kube create -f deploy/k8s/runtime-control.yaml
+fi
 kube apply -f deploy/k8s/apps.yaml
 if [ "$existing_apps" = true ]; then
   # Local images keep their tags, so explicitly replace the old pods on reruns.

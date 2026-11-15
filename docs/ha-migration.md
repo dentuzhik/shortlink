@@ -37,8 +37,11 @@ application VM is six CPUs/six GiB, the source has logical WAL/TLS and the rever
 endpoint is verified. The [initial copy and live stream](database-replication-live.md)
 subsequently passed: 7,764 original links plus eight concurrent-copy test links
 matched on the new primary and both standbys. The old source remains the only
-application writer. Next rehearse writer handoff on disposable data before
-implementing live creation gating, idempotency and pool coordination.
+application writer. [Runtime creation maintenance](runtime-maintenance.md) is now
+implemented and tested for review, with no live rollout. It supports explicit
+creation rejection during maintenance; no final maintenance-window budget or
+live handoff has been qualified. Pool switching, database fencing and safe
+handling of ambiguous write outcomes remain separate increments.
 
 ## Purpose and goals
 

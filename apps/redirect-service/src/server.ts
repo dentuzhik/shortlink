@@ -1,8 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { readDatabaseUrl } from "./database.js";
+import {
+  kubernetesMaintenanceSource,
+  startMaintenanceWatch,
+} from "./maintenance-watch.js";
+import { RuntimeMaintenance } from "./runtime-maintenance.js";
 
 const revision = process.env.APP_REVISION ?? "development";
+const configMap = process.env.MAINTENANCE_CONFIGMAP;
+const maintenance = new RuntimeMaintenance(!configMap);
 const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
   poolMax: Number(process.env.DB_POOL_MAX ?? 5),
   reportPoolWait: process.env.DB_POOL_TIMING === "1",
@@ -13,7 +20,24 @@ const app = buildApp(readDatabaseUrl(process.env.DATABASE_URL), {
     process.env.REDIRECT_DB_CHECKOUT_TIMEOUT_MS ?? 50,
   ),
   revision,
+  maintenance,
 });
+if (configMap) {
+  const namespace = process.env.POD_NAMESPACE;
+  if (!namespace)
+    throw new Error(
+      "POD_NAMESPACE is required for runtime maintenance control",
+    );
+  const watcher = startMaintenanceWatch(
+    maintenance,
+    kubernetesMaintenanceSource(namespace, configMap),
+    () =>
+      app.log.warn(
+        "Runtime maintenance configuration unavailable; rejecting creations",
+      ),
+  );
+  app.addHook("onClose", watcher.stop);
+}
 
 async function shutdown(signal: string) {
   app.log.info({ signal }, "Shutting down");

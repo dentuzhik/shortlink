@@ -8,6 +8,7 @@ import { registerMetrics } from "./metrics.js";
 import { registerRedirectRoute } from "./redirect.js";
 import { createRedirectCheckout } from "./redirect-admission.js";
 import { createRedirectCache } from "./redirect-cache.js";
+import { RuntimeMaintenance } from "./runtime-maintenance.js";
 
 export function buildApp(
   databaseUrl: string,
@@ -19,6 +20,7 @@ export function buildApp(
     redirectMaxWaiters = 128,
     redirectCheckoutTimeoutMs = 50,
     revision = "development",
+    maintenance = new RuntimeMaintenance(true),
   } = {},
 ) {
   const app = Fastify({
@@ -29,6 +31,10 @@ export function buildApp(
   const metrics = registerMetrics(app, pool, revision);
   const metricsServer = metrics.server;
   app.decorate("metricsServer", metricsServer);
+  metricsServer.get("/internal/maintenance", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return maintenance.status();
+  });
   const checkoutRedirect = createRedirectCheckout(
     pool,
     redirectMaxWaiters,
@@ -77,6 +83,10 @@ export function buildApp(
   });
 
   app.get("/readyz", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!maintenance.configurationLoaded) {
+      return reply.code(503).send({ status: "not ready" });
+    }
     try {
       await pool.query("SELECT 1");
       return { status: "ready" };
@@ -87,8 +97,8 @@ export function buildApp(
     }
   });
 
-  registerLinkRoutes(app, linkStore);
-  registerGraphQL(app, createLinkCreator(linkStore));
+  registerLinkRoutes(app, linkStore, undefined, maintenance);
+  registerGraphQL(app, createLinkCreator(linkStore, undefined, maintenance));
   const findTargetUrl = cache?.findTargetUrl ?? linkStore.findTargetUrl;
   registerRedirectRoute(app, findTargetUrl, reportPoolWait, reportCacheHit);
 

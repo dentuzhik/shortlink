@@ -60,7 +60,11 @@
     "db:replication:start": "node scripts/live-replication.mjs start",
     "db:replication:status": "node scripts/live-replication.mjs status",
     "test:replication:live": "node scripts/live-replication.mjs verify",
-    "test:replication:watch": "node scripts/test-replication-watch.mjs"
+    "test:replication:watch": "node scripts/test-replication-watch.mjs",
+    "maintenance:status": "node scripts/runtime-maintenance.mjs status",
+    "maintenance:begin": "node scripts/runtime-maintenance.mjs begin",
+    "maintenance:end": "node scripts/runtime-maintenance.mjs end",
+    "test:maintenance:k8s": "pnpm --filter @url-shortener/redirect-service... build && node scripts/test-runtime-maintenance.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

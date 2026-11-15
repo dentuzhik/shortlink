@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { createLinkStore } from "@url-shortener/db/links";
+import type { RuntimeMaintenance } from "./runtime-maintenance.js";
 
 export const maxTargetUrlLength = 2048;
 const maxCodeAttempts = 3;
@@ -30,30 +31,42 @@ function generateLinkCode(): string {
 export function createLinkCreator(
   store: LinkStore,
   generateCode = generateLinkCode,
+  maintenance?: RuntimeMaintenance,
 ) {
   return async (value: unknown) => {
-    const targetUrl = parseTargetUrl(value);
-    if (!targetUrl) {
+    const release = maintenance?.enterCreation();
+    if (maintenance && !release) {
       return {
-        status: "invalid-url",
-        message: `Enter an absolute HTTP or HTTPS URL without credentials (up to ${maxTargetUrlLength} characters).`,
+        status: "maintenance",
+        message: "Link creation temporarily unavailable",
       } as const;
     }
-
-    for (let attempt = 0; attempt < maxCodeAttempts; attempt++) {
-      const link = await store.insert(generateCode(), targetUrl);
-      if (link) {
+    try {
+      const targetUrl = parseTargetUrl(value);
+      if (!targetUrl) {
         return {
-          status: "created",
-          link: { ...link, createdAt: link.createdAt.toISOString() },
+          status: "invalid-url",
+          message: `Enter an absolute HTTP or HTTPS URL without credentials (up to ${maxTargetUrlLength} characters).`,
         } as const;
       }
-    }
 
-    return {
-      status: "codes-exhausted",
-      message: "Could not allocate a short code; try again",
-    } as const;
+      for (let attempt = 0; attempt < maxCodeAttempts; attempt++) {
+        const link = await store.insert(generateCode(), targetUrl);
+        if (link) {
+          return {
+            status: "created",
+            link: { ...link, createdAt: link.createdAt.toISOString() },
+          } as const;
+        }
+      }
+
+      return {
+        status: "codes-exhausted",
+        message: "Could not allocate a short code; try again",
+      } as const;
+    } finally {
+      release?.();
+    }
   };
 }
 

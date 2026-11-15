@@ -52,6 +52,20 @@ export function registerGraphQL(app: FastifyInstance, createLink: CreateLink) {
             );
 
             if (result.status === "created") return result.link;
+            if (result.status === "maintenance") {
+              throw new GraphQLError(result.message, {
+                extensions: {
+                  code: "MAINTENANCE",
+                  http: {
+                    status: 503,
+                    headers: {
+                      "Cache-Control": "no-store",
+                      "Retry-After": "1",
+                    },
+                  },
+                },
+              });
+            }
             throw new GraphQLError(result.message, {
               extensions: {
                 code:

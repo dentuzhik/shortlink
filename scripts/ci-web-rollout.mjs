@@ -238,6 +238,18 @@ async function up() {
       "job/db-migrate",
       "--timeout=120s",
     );
+    await run("kubectl", [
+      ...kubeArgs,
+      "apply",
+      "-f",
+      "deploy/k8s/runtime-maintenance.yaml",
+    ]);
+    await run("kubectl", [
+      ...kubeArgs,
+      "create",
+      "-f",
+      "deploy/k8s/runtime-control.yaml",
+    ]);
     const apps = await render("deploy/k8s/apps.yaml");
     for (const image of images) {
       const profile = releaseTarget(image.target);

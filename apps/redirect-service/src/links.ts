@@ -23,6 +23,12 @@ export function registerLinkRoutes(
       try {
         const result = await createLink(request.body?.targetUrl);
         switch (result.status) {
+          case "maintenance":
+            return reply
+              .code(503)
+              .header("Cache-Control", "no-store")
+              .header("Retry-After", "1")
+              .send({ error: result.message, code: "MAINTENANCE" });
           case "created":
             return reply.code(201).send(result.link);
           case "invalid-url":

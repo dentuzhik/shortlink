@@ -20,12 +20,22 @@ import {
   vi,
 } from "vitest";
 import type { buildApp as buildProductionApp } from "../../src/app.js";
+import type * as WatchTypes from "../../src/maintenance-watch.js";
+import type * as MaintenanceTypes from "../../src/runtime-maintenance.js";
+import { maintenanceApi } from "../helpers/maintenance-api.js";
 
 const run = promisify(execFile);
 // Use Node's module loader so GraphQL Yoga and the app share one GraphQL runtime.
 const { buildApp } = createRequire(import.meta.url)("../../dist/app.js") as {
   buildApp: typeof buildProductionApp;
 };
+
+const { RuntimeMaintenance } = createRequire(import.meta.url)(
+  "../../dist/runtime-maintenance.js",
+) as typeof MaintenanceTypes;
+const { kubernetesMaintenanceSource, startMaintenanceWatch } = createRequire(
+  import.meta.url,
+)("../../dist/maintenance-watch.js") as typeof WatchTypes;
 
 describe("links with Postgres", () => {
   let postgres: StartedPostgreSqlContainer | undefined;
@@ -218,6 +228,157 @@ describe("links with Postgres", () => {
     await expect(fetch(`${applicationUrl}/healthz`)).rejects.toThrow();
     await expect(fetch(`${metricsUrl}/metrics`)).rejects.toThrow();
   });
+
+  test("coordinates maintenance across two instances without restarting them or blocking redirects", async () => {
+    const api = await maintenanceApi();
+    const instances: ReturnType<typeof buildApp>[] = [];
+    const start = () => {
+      const control = new RuntimeMaintenance();
+      const instance = buildApp(databaseUrl, { maintenance: control });
+      instance.log.level = "silent";
+      const watcher = startMaintenanceWatch(
+        control,
+        kubernetesMaintenanceSource("shortlink", "shortlink-runtime", api),
+        () => {},
+        10,
+      );
+      instance.addHook("onClose", watcher.stop);
+      instances.push(instance);
+      return instance;
+    };
+    const status = async (instance: ReturnType<typeof buildApp>) =>
+      (
+        await instance
+          .getDecorator<FastifyInstance>("metricsServer")
+          .inject("/internal/maintenance")
+      ).json();
+    const targetUrl = "https://example.test/runtime-maintenance";
+    const rest = (instance: ReturnType<typeof buildApp>) =>
+      instance
+        .inject({ method: "POST", url: "/links", payload: { targetUrl } })
+        .then((response) => response);
+    const graphql = (instance: ReturnType<typeof buildApp>) =>
+      instance
+        .inject({
+          method: "POST",
+          url: "/graphql",
+          payload: {
+            query:
+              "mutation($input:CreateLinkInput!){createLink(input:$input){code}}",
+            variables: { input: { targetUrl } },
+          },
+        })
+        .then((response) => response);
+    let first = start();
+    const second = start();
+    const both = async (expected: Record<string, unknown>) => {
+      await vi.waitFor(
+        async () => {
+          for (const instance of [first, second])
+            expect(await status(instance)).toMatchObject(expected);
+        },
+        { interval: 5, timeout: 2000 },
+      );
+    };
+    const locker = new Client({ connectionString: databaseUrl });
+    const pending: Promise<unknown>[] = [];
+    try {
+      await locker.connect();
+      expect((await first.inject("/readyz")).statusCode).toBe(503);
+      expect((await rest(first)).statusCode).toBe(503);
+      expect((await graphql(second)).statusCode).toBe(503);
+      api.setAvailable(true);
+      await both({ observedRevision: 1, acceptingCreations: true });
+      const created = await rest(first);
+      expect(created.statusCode).toBe(201);
+      const code = created.json<{ code: string }>().code;
+      expect((await first.inject("/internal/maintenance")).statusCode).toBe(
+        404,
+      );
+
+      await locker.query("BEGIN");
+      // Blocks INSERT but allows redirect SELECTs and readiness probes.
+      await locker.query("LOCK TABLE links IN SHARE MODE");
+      const admittedRest = rest(first);
+      const admittedGraphql = graphql(second);
+      pending.push(admittedRest, admittedGraphql);
+      await both({ inflightCreations: 1 });
+      api.update({ revision: 2, creationMode: "reject" });
+      await both({
+        observedRevision: 2,
+        acceptingCreations: false,
+        drained: false,
+      });
+      for (const response of [await rest(first), await graphql(second)]) {
+        expect(response.statusCode).toBe(503);
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.headers["retry-after"]).toBe("1");
+      }
+      expect((await graphql(first)).json()).toMatchObject({
+        errors: [{ extensions: { code: "MAINTENANCE" } }],
+      });
+      for (const instance of [first, second]) {
+        expect((await instance.inject("/readyz")).statusCode).toBe(200);
+        const redirect = await instance.inject(`/${code}`);
+        expect(redirect.statusCode).toBe(302);
+        expect(redirect.headers.location).toBe(targetUrl);
+        const query = await instance.inject({
+          method: "POST",
+          url: "/graphql",
+          payload: { query: "{status}" },
+        });
+        expect(query.json()).toEqual({ data: { status: "ok" } });
+      }
+      await locker.query("ROLLBACK");
+      expect((await admittedRest).statusCode).toBe(201);
+      expect((await admittedGraphql).json()).toHaveProperty(
+        "data.createLink.code",
+      );
+      await both({ drained: true, inflightCreations: 0 });
+      const count = await locker.query(
+        "SELECT count(*)::int AS count FROM links WHERE target_url=$1",
+        [targetUrl],
+      );
+      expect(count.rows[0].count).toBe(3);
+
+      api.update({ revision: 3, creationMode: "typo" });
+      await both({
+        observedRevision: 2,
+        configurationCurrent: false,
+        acceptingCreations: false,
+      });
+      expect((await first.inject("/readyz")).statusCode).toBe(200);
+      api.update({ revision: 4, creationMode: "reject" });
+      await both({ observedRevision: 4, drained: true });
+      await first.close();
+      first = start(); // Fresh process state must load reject rather than default accept.
+      expect((await rest(first)).statusCode).toBe(503);
+      await both({ observedRevision: 4, drained: true });
+
+      api.update({ revision: 5, creationMode: "accept" });
+      await both({ observedRevision: 5, acceptingCreations: true });
+      expect((await rest(first)).statusCode).toBe(201);
+      expect((await graphql(second)).json()).toHaveProperty(
+        "data.createLink.code",
+      );
+      await api.rotateToken();
+      api.expireWatches(); // Normal watch rotation rereads projected token files.
+      await both({ observedRevision: 5, acceptingCreations: true });
+      api.setAvailable(false);
+      await both({ configurationCurrent: false, acceptingCreations: false });
+      expect((await rest(first)).statusCode).toBe(503);
+      expect((await first.inject("/readyz")).statusCode).toBe(200);
+      api.update({ revision: 6, creationMode: "reject" });
+      api.setAvailable(true);
+      await both({ observedRevision: 6, drained: true });
+    } finally {
+      await locker.query("ROLLBACK");
+      await Promise.allSettled(pending);
+      await locker.end();
+      await Promise.all(instances.map((instance) => instance.close()));
+      await api.close();
+    }
+  }, 20000);
 
   describe("redirect cache with Redis", () => {
     const targetUrl = "https://example.com/cached";
