@@ -588,7 +588,7 @@ try {
         "node",
         ["scripts/release-redirect.mjs", "stage", revision],
         undefined,
-        180000,
+        600000,
       );
       const evidence = staged.match(/Release evidence: (.+)/)?.[1];
       ensure(evidence, "Image staging did not return evidence");
@@ -633,6 +633,11 @@ try {
         op: "test",
         path: "/metadata/resourceVersion",
         value: before.metadata.resourceVersion,
+      },
+      {
+        op: "add",
+        path: "/metadata/annotations/kubernetes.io~1change-cause",
+        value: `Runtime database roles with redirect ${revision}`,
       },
       { op: "replace", path: "/spec/template", value: template },
     ]);

@@ -64,7 +64,7 @@ if (plan.action === "application-roles") {
   const staged = await execute(
     "node",
     ["scripts/prepare-application-roles.mjs", "stage", plan.revision],
-    { timeout: 420000, maxBuffer: 8 * 1024 * 1024 },
+    { timeout: 900000, maxBuffer: 8 * 1024 * 1024 },
   );
   imagePreparation = {
     mode: "Both runtime roles and published image staged",

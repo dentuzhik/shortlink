@@ -198,8 +198,9 @@ Preparing a target is distinct from making it authoritative. Source continues
 handling all reads and writes, and its new commits continue replicating into
 HA. The [logical recovery qualification](experiments/ha-backup-restore.md) and
 [disposable handoff](experiments/database-handoff.md) have passed; the latter
-used a 25/2 workload. The dedicated-role deployment and operating-load
-qualification are separate gates before real cutover. See the
+used a 25/2 workload. The [dedicated-role deployment](experiments/application-roles.md)
+also passed at 25/2; operating-load qualification and final handoff preflight
+remain open before real cutover. See the
 [preparation trial](experiments/ha-target-preparation.md) for its separate
 measured results and remaining boundaries.
 

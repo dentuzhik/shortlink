@@ -981,9 +981,17 @@ try {
       ).items.every((s) => !(s.endpoints ?? []).length),
     "Target endpoints remained during fault",
   );
-  await sql(
-    "target",
-    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='shortlink_lab' AND application_name='redirect-service';",
+  report.invalidatedCandidateSessions = Number(
+    (
+      await sql(
+        "target",
+        "WITH candidates AS MATERIALIZED (SELECT pid FROM pg_stat_activity WHERE usename='shortlink_app' AND application_name='redirect-service') SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) FROM candidates;",
+      )
+    ).trim(),
+  );
+  ensure(
+    report.invalidatedCandidateSessions >= 2,
+    "The fault did not terminate both runtime candidate sessions",
   );
   const failed = await control(
     { activeDatabase: "ha", prepareDatabase: null },

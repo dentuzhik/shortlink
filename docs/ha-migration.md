@@ -54,10 +54,13 @@ clone-only sequence preparation and no live writer change. A
 passed at 25 redirects/s plus two creation attempts/s, with a deliberate
 pre-fence failure and a measured 1.174-second successful creation-maintenance
 window. Its permission-based fence requires a dedicated source application
-role: the live login is the bootstrap superuser and cannot be demoted. The [dedicated application-role increment](database-application-roles.md) prepares
-both source and HA runtime identities without transferring writer authority.
-Its deployment qualification, the failed operating-load qualification and final
-preflight remain gates before real cutover.
+role: the live login is the bootstrap superuser and cannot be demoted. The [dedicated application-role increment](database-application-roles.md) now
+provisions both runtime identities and has a passing [combined image/credential
+rollout](experiments/application-roles.md) at 25/2. Both Fastify pods use restricted
+TLS logins for source and HA candidates; source remains active. The repeated
+disposable handoff also passed with those roles. The failed operating-load
+qualification, reviewed live runbook/window and final preflight remain gates
+before real cutover.
 
 ## Purpose and goals
 

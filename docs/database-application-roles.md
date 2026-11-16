@@ -2,6 +2,9 @@
 
 [Migration plan](ha-migration.md) · [Handoff rehearsal](database-handoff-rehearsal.md)
 
+**Deployed and qualified at the reduced 25/2 workload on November 15, 2026.**
+See [results and remaining gates](experiments/application-roles.md).
+
 Fastify uses a separate `shortlink_app` login on source and HA, with independent
 passwords. Database selection remains a separate runtime setting: preparing or
 deploying these credentials never selects HA or closes the creation gate.
@@ -20,8 +23,8 @@ deploying these credentials never selects HA or closes the creation gate.
 The runtime role has CONNECT to `shortener`, USAGE on `public`/`drizzle`,
 SELECT/INSERT on `links`, USAGE on its identity sequence, and read-only migration
 history access for diagnostics. It owns no database, schema or table; has no
-role memberships, administrative attributes, UPDATE, DELETE, TRUNCATE, DDL,
-sequence-reset or migration-writing permissions. Grants name the current objects;
+role memberships, administrative attributes, UPDATE, DELETE, TRUNCATE,
+permanent DDL, sequence-reset or migration-writing permissions. Grants name the current objects;
 future schema migrations must explicitly review any additional runtime grants.
 The shared SQL is [application-runtime-role.sql](../deploy/migration/application-runtime-role.sql).
 

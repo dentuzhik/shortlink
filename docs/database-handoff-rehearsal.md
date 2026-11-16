@@ -3,7 +3,8 @@
 [Migration plan](ha-migration.md) · [Runtime pools](database-pool-switching.md)
 
 **Status: passed November 15, 2026 at the reduced 25/2 workload.**
-See [measured results and remaining gates](experiments/database-handoff.md).
+See [original measured results](experiments/database-handoff.md) and the passing
+[both-runtime-role repeat](experiments/application-roles.md).
 This exercise creates throwaway databases and Fastify replicas in an owned
 namespace on the existing application cluster. The live application keeps
 using source; the real HA database, replication subscription and sequences are
@@ -103,8 +104,8 @@ not revoke an existing session's permissions.
 The original passing run used a non-bootstrap superuser fixture, as preserved
 in its historical report. The [runtime-role increment](database-application-roles.md)
 aligns the fixture and live role model. The live bootstrap account `shortener`
-remains an administrator; Fastify must use its separate runtime login before a
-real permission fence can be applied. Administrators capable of restoring
+remains an administrator. Fastify now uses its separate runtime login after the
+role rollout; live fencing is still a later cutover operation. Administrators capable of restoring
 permissions are outside this ordinary-runtime-client fencing guarantee.
 
 ## Evidence and limits
