@@ -6,10 +6,10 @@ WITH s AS (
     pg_wal_lsn_diff(pg_current_wal_lsn(),confirmed_flush_lsn)::bigint AS unconfirmed_bytes
   FROM pg_replication_slots WHERE slot_name='shortlink_migration_sub'
 ), health AS (
-  SELECT NOT (:'slot_required')::boolean OR EXISTS (
+  SELECT (NOT (:'slot_required')::boolean AND NOT EXISTS(SELECT 1 FROM s)) OR EXISTS (
     SELECT 1 FROM s WHERE invalidation_reason IS NULL AND wal_status <> 'lost'
       AND retained_bytes < 100663296
-      AND (active OR inactive_since > clock_timestamp()-interval '2 minutes')
+      AND (NOT (:'slot_required')::boolean OR active OR inactive_since > clock_timestamp()-interval '2 minutes')
   ) AS ok
 )
 SELECT json_build_object('time',clock_timestamp(),'slotRequired',(:'slot_required')::boolean,

@@ -68,6 +68,8 @@ jobs:
         run: docker info
       - name: Run migrations and integration tests on disposable databases
         run: pnpm test:integration
+      - name: Test cutover guards on two disposable Postgres instances
+        run: pnpm test:cutover:sql
 
   images:
     name: Container image (${{ matrix.target }}, ${{ matrix.platform.arch }})

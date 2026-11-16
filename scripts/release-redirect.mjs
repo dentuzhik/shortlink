@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { shortLinkOrigin } from "../apps/web/lib/runtime-config.ts";
+import { assertReleaseOutsideCutover } from "./lib/cutover.mjs";
 import {
   assertSourceConfiguration,
   assertStagedDigest,
@@ -378,6 +379,40 @@ if (action === "status") {
   await mkdir(directory, { recursive: true });
   const report = { target, action, argument, directory, startedAt: Date.now() };
   try {
+    let cutover;
+    if (
+      target === "redirect" &&
+      ["deploy", "deploy-local", "rollback"].includes(action)
+    ) {
+      const raw = await output("kubectl", [
+        ...kubeArgs,
+        "get",
+        "configmap",
+        "database-cutover",
+        "--ignore-not-found",
+        "-o",
+        "json",
+      ]);
+      if (raw.trim()) {
+        const object = JSON.parse(raw);
+        if (
+          object.metadata.labels?.["shortlink.dev/exercise"] !== "live-cutover"
+        )
+          throw new Error("Unmanaged database cutover control");
+        cutover = JSON.parse(object.data["journal.json"]);
+        if (!["aborted", "complete"].includes(cutover.status))
+          throw new Error("Finish cutover recovery before changing API images");
+        if (cutover.status === "complete") {
+          const control = await kubeJson(
+            "get",
+            "configmap",
+            "shortlink-runtime",
+          );
+          if (JSON.parse(control.data["control.json"]).activeDatabase !== "ha")
+            throw new Error("Completed cutover must retain HA selection");
+        }
+      }
+    }
     if (action === "stage") {
       process.env.DOCKER_CONTEXT = "colima";
       report.release = await published(argument);
@@ -426,6 +461,15 @@ if (action === "status") {
           report.release.digest = await load(report.release.image);
         }
         const { image, revision, digest } = report.release;
+        if (cutover?.status === "complete")
+          assertReleaseOutsideCutover(
+            cutover,
+            deployment.spec.template,
+            await output("git", [
+              "show",
+              `${revision}:apps/redirect-service/src/server.ts`,
+            ]),
+          );
         const container = {
           name: profile.container,
           image,
@@ -512,6 +556,25 @@ if (action === "status") {
           )
         ).items;
         report.release = rollbackTarget(deployment, sets, argument, target);
+        if (cutover?.status === "complete") {
+          const selected = sets.find(
+            (s) =>
+              s.metadata.ownerReferences?.some(
+                (owner) => owner.uid === deployment.metadata.uid,
+              ) &&
+              Number(
+                s.metadata.annotations["deployment.kubernetes.io/revision"],
+              ) === report.release.kubernetesRevision,
+          );
+          assertReleaseOutsideCutover(
+            cutover,
+            selected.spec.template,
+            await output("git", [
+              "show",
+              `${report.release.revision}:apps/redirect-service/src/server.ts`,
+            ]),
+          );
+        }
         if (report.release.image.startsWith("ghcr.io/")) {
           await pullPublished(report.release);
         } else {

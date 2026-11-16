@@ -21,6 +21,7 @@ while (lock === undefined) {
 process.on('exit', () => { fs.closeSync(lock); fs.rmSync(file + '.lock'); });
 const state = JSON.parse(fs.readFileSync(file, 'utf8'));
 const args = process.argv.slice(2);
+if(args.includes('database-cutover')){if(state.cutover)process.stdout.write(JSON.stringify({metadata:{labels:{'shortlink.dev/exercise':'live-cutover'}},data:{'journal.json':JSON.stringify(state.cutover)}}));process.exit(0);}
 const write = (value) => { fs.writeFileSync(file, JSON.stringify(state)); process.stdout.write(JSON.stringify(value)); };
 const fail = () => { process.stderr.write('fixture request failed'); process.exit(1); };
 if (args.includes('--raw')) {
@@ -83,8 +84,23 @@ async function fixture(t, concurrentChange = false) {
   return {
     command,
     state: async () => JSON.parse(await readFile(stateFile, "utf8")),
+    cutover: async () => {
+      const value = JSON.parse(await readFile(stateFile, "utf8"));
+      value.cutover = { status: "paused" };
+      await writeFile(stateFile, JSON.stringify(value));
+    },
   };
 }
+
+test("an active cutover blocks ordinary maintenance mutations while status remains readable", async (t) => {
+  const { command, state, cutover } = await fixture(t);
+  await cutover();
+  await assert.rejects(command("begin"), (error) =>
+    error.stderr.includes("cutover journal"),
+  );
+  await command("status");
+  assert.equal((await state()).patchCalls, 0);
+});
 
 test("maintenance command waits for both replicas and a still-serving terminating pod, then reopens", async (t) => {
   const { command, state } = await fixture(t);

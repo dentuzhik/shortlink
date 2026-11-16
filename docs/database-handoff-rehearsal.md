@@ -19,6 +19,21 @@ requires the existing source stack and prepared HA candidates to be healthy,
 measured spare guest capacity, Docker context `colima` and the explicitly selected
 `kind-shortlink` context in `.kind/kubeconfig`.
 
+For the guarded coordinator's **successful flow only**, use:
+
+```sh
+pnpm test:cutover:success
+```
+
+This mode passed November 16 with all ten real coordinator phases. It skips the
+legacy pre-fence connectivity failure and negative privilege probes described
+below, retains the publisher slot after disabling replication, and uses the
+coordinator's durable journal and phase guards. It verifies fencing through
+effective privileges and frozen source contents, switches both pools, admits a
+destination-only canary and audits acknowledged writes. No interruption is
+injected. See [results and limits](experiments/cutover-success.md). The remaining
+legacy stage description applies to `test:db-handoff`.
+
 ## Fixture
 
 The [coordinator](../scripts/rehearse-handoff.mjs) creates a run-labelled
@@ -128,9 +143,10 @@ A failed preflight is not a handoff trial.
 This first rehearsal does not qualify failures after fencing, unknown commit
 outcomes, safe return to source after destination writes, node/VM loss, CNPG
 failover, or production throughput. The earlier failed live rollout load trial
-also remains unresolved. Live migration requires the source-role prerequisite,
-a reviewed maintenance window, passing rehearsal/load gates and final backup/
-replication preflight.
+also remains unresolved. A controlled low-traffic cutover may precede that
+performance qualification, as agreed November 16. Live migration uses the
+[guarded procedure](database-cutover.md), a reviewed stop/recovery allowance,
+a complete coordinator rehearsal and fresh backup/replication preflight.
 
 References: [ALTER ROLE](https://www.postgresql.org/docs/18/sql-alterrole.html),
 [REASSIGN OWNED](https://www.postgresql.org/docs/18/sql-reassign-owned.html),

@@ -58,9 +58,14 @@ role: the live login is the bootstrap superuser and cannot be demoted. The [dedi
 provisions both runtime identities and has a passing [combined image/credential
 rollout](experiments/application-roles.md) at 25/2. Both Fastify pods use restricted
 TLS logins for source and HA candidates; source remains active. The repeated
-disposable handoff also passed with those roles. The failed operating-load
-qualification, reviewed live runbook/window and final preflight remain gates
-before real cutover.
+disposable handoff also passed with those roles. A [guarded live procedure](database-cutover.md) is now prepared; source remains
+selected and execution has not run. On November 16 we agreed that a controlled
+cutover at the reduced workload may precede full performance qualification.
+The [successful coordinator rehearsal](experiments/cutover-success.md) subsequently
+passed under 25/2 traffic without interruption injection. Reviewed stop/recovery
+and backup-age limits plus fresh preflight remain before live execution; the
+1,000/10 performance target stays unqualified. The watcher repair found during
+this exercise is deployed as `0a7dc89`; source remains selected and writable.
 
 ## Purpose and goals
 
@@ -275,12 +280,12 @@ recorded cohort of writes made during synchronization.
 
 ### 4. Move the existing application to the new database tier
 
-First rehearse with disposable data. Coordinate every writer: hold new creations
-at a bounded boundary, finish in-flight writes, fence the old writer, establish a
+First rehearse with disposable data. Coordinate every writer: reject new creations
+with explicit maintenance responses, finish in-flight writes, fence the old writer, establish a
 final replication position and verify destination application of those changes.
 Synchronize required objects/sequences, complete the migration subscription
 handoff, enable the destination as sole writer, move application pools and
-release held creations. Preserve a defined redirect read path throughout.
+reopen creation admission. Preserve a defined redirect read path throughout.
 
 A changed hostname or primary endpoint does not move existing pooled connections.
 Unknown commit outcomes must not trigger blind creation retries; decide whether

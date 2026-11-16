@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { setTimeout as delay } from "node:timers/promises";
 import { checkServerIdentity } from "node:tls";
+import { successfulCoordinator } from "./lib/cutover-fixture.mjs";
 import {
   appGet,
   appKube,
@@ -32,16 +33,24 @@ import {
 } from "./lib/live-replication.mjs";
 import { verifyPrivileges } from "./source-role-probe.cjs";
 
+const successfulOnly =
+  process.argv.length === 3 && process.argv[2] === "--coordinator";
 ensure(
-  process.argv.length === 2,
-  "Use rehearse-handoff.mjs with no arguments; only disposable targets are supported",
+  process.argv.length === 2 || successfulOnly,
+  "Use rehearse-handoff.mjs [--coordinator]; only disposable targets are supported",
 );
+const subscription = successfulOnly ? "shortlink_migration_sub" : "handoff_sub";
+const publication = successfulOnly
+  ? "shortlink_migration"
+  : "handoff_publication";
 process.env.DOCKER_CONTEXT = "colima";
 const runId = randomBytes(8).toString("hex");
 const namespace = fixtureNamespace(runId);
 const path = await directory("handoff-rehearsals");
 const labels = { "shortlink.dev/handoff-run": runId };
 const report = {
+  mode: successfulOnly ? "successful-coordinator" : "legacy-handoff",
+  interruptionInjection: !successfulOnly,
   startedAt: new Date().toISOString(),
   runId,
   namespace,
@@ -619,7 +628,7 @@ try {
     INSERT INTO drizzle.__drizzle_migrations(id,hash,created_at) VALUES(7,'handoff-fixture',1);
     SELECT setval('public.links_id_seq',1000,true); SELECT setval('drizzle.__drizzle_migrations_id_seq',2000,true);
     CREATE ROLE fixture_repl LOGIN REPLICATION NOSUPERUSER PASSWORD '${replicationPassword}'; GRANT CONNECT ON DATABASE shortener TO fixture_repl; GRANT USAGE ON SCHEMA public,drizzle TO fixture_repl; GRANT SELECT ON ALL TABLES IN SCHEMA public,drizzle TO fixture_repl;
-    CREATE PUBLICATION handoff_publication FOR TABLE public.links,drizzle.__drizzle_migrations,public.handoff_barrier;`,
+    CREATE PUBLICATION ${publication} FOR TABLE public.links,drizzle.__drizzle_migrations${successfulOnly ? "" : ",public.handoff_barrier"};`,
   );
   await sql(
     "source",
@@ -747,7 +756,7 @@ try {
   );
   await sql(
     "target",
-    `CREATE SUBSCRIPTION handoff_sub CONNECTION 'host=${sourceHost} port=5432 dbname=shortener user=fixture_repl passfile=/data/pgdata/migration.pgpass sslmode=verify-full sslrootcert=/tls/ca.crt application_name=handoff_sub connect_timeout=3' PUBLICATION handoff_publication WITH (copy_data=true,streaming=off);`,
+    `CREATE SUBSCRIPTION ${subscription} CONNECTION 'host=${sourceHost} port=5432 dbname=shortener user=fixture_repl passfile=/data/pgdata/migration.pgpass sslmode=verify-full sslrootcert=/tls/ca.crt application_name=handoff_sub connect_timeout=3' PUBLICATION ${publication} WITH (copy_data=true,streaming=off);`,
   );
   await waitFor(
     async () =>
@@ -822,6 +831,29 @@ try {
       },
     },
   });
+  if (successfulOnly) {
+    await create({
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: { name: "handoff-api" },
+      spec: {
+        selector: { app: "handoff-api" },
+        ports: [{ port: 3000, targetPort: 3000 }],
+      },
+    });
+    await create({
+      apiVersion: "v1",
+      kind: "ConfigMap",
+      metadata: { name: "migration-replication-watch" },
+      data: {
+        "require-slot": "true",
+        "check.sql": await readFile(
+          "deploy/migration/replication-watch.sql",
+          "utf8",
+        ),
+      },
+    });
+  }
   await kube(
     ["rollout", "status", "deployment/handoff-api", "--timeout=90s"],
     undefined,
@@ -837,56 +869,58 @@ try {
     uid: p.metadata.uid,
     ip: p.status.podIP,
   }));
-  const port = await databasePort("source");
-  rogue = new Client({
-    host: "127.0.0.1",
-    port,
-    database: "shortener",
-    user: "shortlink_app",
-    password: sourcePassword,
-    ssl: {
-      ca: await readFile(`${path}/tls/ca.crt`, "utf8"),
-      servername: sourceHost,
-      rejectUnauthorized: true,
-      checkServerIdentity: (_name, cert) =>
-        checkServerIdentity(sourceHost, cert),
-    },
-    connectionTimeoutMillis: 3000,
-    query_timeout: 3000,
-  });
-  rogue.on("error", () => {});
-  await rogue.connect();
-  report.oldConnection = (
-    await rogue.query(
-      "SELECT pg_backend_pid() AS pid,current_user AS role,(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser",
-    )
-  ).rows[0];
-  assert.equal(report.oldConnection.superuser, false);
-  report.applicationPrivileges = await verifyPrivileges(rogue, true);
-  const targetProbe = new Client({
-    host: "127.0.0.1",
-    port: await databasePort("target"),
-    database: "shortener",
-    user: "shortlink_app",
-    password: targetPassword,
-    ssl: {
-      ca: await readFile(`${path}/tls/ca.crt`, "utf8"),
-      servername: targetHost,
-      rejectUnauthorized: true,
-      checkServerIdentity: (_name, cert) =>
-        checkServerIdentity(targetHost, cert),
-    },
-    connectionTimeoutMillis: 3000,
-    query_timeout: 3000,
-  });
-  try {
-    await targetProbe.connect();
-    report.targetApplicationPrivileges = await verifyPrivileges(
-      targetProbe,
-      true,
-    );
-  } finally {
-    await targetProbe.end();
+  if (!successfulOnly) {
+    const port = await databasePort("source");
+    rogue = new Client({
+      host: "127.0.0.1",
+      port,
+      database: "shortener",
+      user: "shortlink_app",
+      password: sourcePassword,
+      ssl: {
+        ca: await readFile(`${path}/tls/ca.crt`, "utf8"),
+        servername: sourceHost,
+        rejectUnauthorized: true,
+        checkServerIdentity: (_name, cert) =>
+          checkServerIdentity(sourceHost, cert),
+      },
+      connectionTimeoutMillis: 3000,
+      query_timeout: 3000,
+    });
+    rogue.on("error", () => {});
+    await rogue.connect();
+    report.oldConnection = (
+      await rogue.query(
+        "SELECT pg_backend_pid() AS pid,current_user AS role,(SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser",
+      )
+    ).rows[0];
+    assert.equal(report.oldConnection.superuser, false);
+    report.applicationPrivileges = await verifyPrivileges(rogue, true);
+    const targetProbe = new Client({
+      host: "127.0.0.1",
+      port: await databasePort("target"),
+      database: "shortener",
+      user: "shortlink_app",
+      password: targetPassword,
+      ssl: {
+        ca: await readFile(`${path}/tls/ca.crt`, "utf8"),
+        servername: targetHost,
+        rejectUnauthorized: true,
+        checkServerIdentity: (_name, cert) =>
+          checkServerIdentity(targetHost, cert),
+      },
+      connectionTimeoutMillis: 3000,
+      query_timeout: 3000,
+    });
+    try {
+      await targetProbe.connect();
+      report.targetApplicationPrivileges = await verifyPrivileges(
+        targetProbe,
+        true,
+      );
+    } finally {
+      await targetProbe.end();
+    }
   }
 
   await create({
@@ -919,6 +953,7 @@ try {
                 .join(","),
             },
             { name: "RUN_ID", value: runId },
+            { name: "SUCCESSFUL_COORDINATOR", value: String(successfulOnly) },
           ],
           resources: {
             requests: { cpu: "50m", memory: "64Mi" },
@@ -957,191 +992,229 @@ try {
   );
   await event("baseline");
   await delay(10000);
-  await event("failure-before-fencing");
-  report.failureMaintenanceStartedAt = Date.now();
-  await control({ creationMode: "reject" });
-  // Remove the fixture Service endpoints and invalidate existing candidate sessions.
-  await kube([
-    "patch",
-    "service",
-    "handoff-target",
-    "--type=merge",
-    "-p",
-    JSON.stringify({ spec: { selector: { app: "deliberately-unavailable" } } }),
-  ]);
-  await waitFor(
-    async () =>
-      (
-        await get([
-          "get",
-          "endpointslices",
-          "-l",
-          "kubernetes.io/service-name=handoff-target",
-        ])
-      ).items.every((s) => !(s.endpoints ?? []).length),
-    "Target endpoints remained during fault",
-  );
-  report.invalidatedCandidateSessions = Number(
-    (
-      await sql(
-        "target",
-        "WITH candidates AS MATERIALIZED (SELECT pid FROM pg_stat_activity WHERE usename='shortlink_app' AND application_name='redirect-service') SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) FROM candidates;",
-      )
-    ).trim(),
-  );
-  ensure(
-    report.invalidatedCandidateSessions >= 2,
-    "The fault did not terminate both runtime candidate sessions",
-  );
-  const failed = await control(
-    { activeDatabase: "ha", prepareDatabase: null },
-    "source",
-    false,
-  );
-  report.checks.failedSwitchRetainedSourceAndClosedWrites = failed;
-  await delay(3000);
-  await kube([
-    "patch",
-    "service",
-    "handoff-target",
-    "--type=merge",
-    "-p",
-    JSON.stringify({ spec: { selector: { app: "handoff-target" } } }),
-  ]);
-  await waitFor(
-    async () =>
-      (
-        await get([
-          "get",
-          "endpointslices",
-          "-l",
-          "kubernetes.io/service-name=handoff-target",
-        ])
-      ).items.some((s) => (s.endpoints ?? []).some((e) => e.conditions.ready)),
-    "Target endpoints did not recover",
-  );
-  await control({ activeDatabase: "source", prepareDatabase: "ha" });
-  await control({ creationMode: "accept" });
-  report.failureMaintenanceEndedAt = Date.now();
-  await event("recovered-source-baseline");
-  await delay(5000);
-  await event("real-fixture-handoff");
-  report.handoffMaintenanceStartedAt = Date.now();
-  await control({ creationMode: "reject" });
-  // Demonstrate that an extra client can still write after the API gate has drained.
-  report.outsideGate = (
-    await rogue.query(
-      "INSERT INTO public.links(code,target_url) VALUES($1,$2) RETURNING id::text,code,target_url",
-      ["rogueA01", `https://example.test/rogue/${runId}`],
-    )
-  ).rows[0];
-  assertFixture(await appGet(["get", "namespace", namespace]), runId);
-  report.fenceStartedAt = Date.now();
-  const lsn = (
-    await sql(
-      "source",
-      fenceSql(
-        await readFile("deploy/migration/handoff/fence.sql", "utf8"),
-        runId,
-      ),
-    )
-  ).trim();
-  assert.match(lsn, /^[A-F0-9]+\/[A-F0-9]+$/);
-  report.fenceLsn = lsn;
-  report.fencedAt = Date.now();
-  try {
-    await rogue.query(
-      "INSERT INTO public.links(code,target_url) VALUES('rogueB01','https://example.test/must-be-denied')",
+  if (successfulOnly) {
+    await event("successful-coordinator");
+    report.coordinator = await successfulCoordinator({
+      runId,
+      namespace,
+      path,
+      kube,
+      get,
+      sql,
+      statuses,
+      event,
+      isInterrupted: () => interrupted || Boolean(monitorError),
+    });
+    const checkpoint = report.coordinator.journal;
+    desired = (await get(["get", "configmap", "shortlink-runtime"])).data[
+      "control.json"
+    ];
+    desired = JSON.parse(desired);
+    report.handoffMaintenanceStartedAt = checkpoint.steps.gate.intentAt;
+    report.handoffMaintenanceEndedAt = checkpoint.steps.open.completedAt;
+    report.fencedAt = checkpoint.steps.fence.completedAt;
+    report.poolsSwitchedAt = checkpoint.steps.switch.completedAt;
+    report.finalSource = JSON.parse(await sql("source", digest));
+    report.checks.successfulCoordinatorComplete =
+      checkpoint.status === "complete";
+    report.checks.sourceRuntimeFenced =
+      !report.coordinator.sourceRole.can_insert;
+    report.checks.migrationDisabledWithSlotRetained =
+      report.coordinator.slotRetained;
+  } else {
+    await event("failure-before-fencing");
+    report.failureMaintenanceStartedAt = Date.now();
+    await control({ creationMode: "reject" });
+    // Remove the fixture Service endpoints and invalidate existing candidate sessions.
+    await kube([
+      "patch",
+      "service",
+      "handoff-target",
+      "--type=merge",
+      "-p",
+      JSON.stringify({
+        spec: { selector: { app: "deliberately-unavailable" } },
+      }),
+    ]);
+    await waitFor(
+      async () =>
+        (
+          await get([
+            "get",
+            "endpointslices",
+            "-l",
+            "kubernetes.io/service-name=handoff-target",
+          ])
+        ).items.every((s) => !(s.endpoints ?? []).length),
+      "Target endpoints remained during fault",
     );
-    throw new Error("Old writer still inserted after fencing");
-  } catch (error) {
-    assert.equal(error.code, "42501");
-    report.checks.oldConnectionWriteDenied = error.code;
-  }
-  const oldRead = (
-    await rogue.query(
-      "SELECT pg_backend_pid() AS pid,(SELECT count(*)::int FROM public.links) AS links",
-    )
-  ).rows[0];
-  assert.equal(oldRead.pid, report.oldConnection.pid);
-  report.checks.sameConnectionStillReads = oldRead;
-  report.fencedPrivileges = (
-    await rogue.query(
-      "SELECT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser,has_table_privilege(current_user,'public.links','SELECT') AS can_read,has_table_privilege(current_user,'public.links','INSERT') AS can_insert,has_table_privilege(current_user,'public.links','UPDATE') AS can_update,has_table_privilege(current_user,'public.links','DELETE') AS can_delete,has_table_privilege(current_user,'public.links','TRUNCATE') AS can_truncate",
-    )
-  ).rows[0];
-  assert.deepEqual(report.fencedPrivileges, {
-    superuser: false,
-    can_read: true,
-    can_insert: false,
-    can_update: false,
-    can_delete: false,
-    can_truncate: false,
-  });
-  const gates = { fenced: true };
-  await waitFor(async () => {
-    const progress = JSON.parse(
-      await sql(
-        "target",
-        `SELECT json_build_object('barrier',EXISTS(SELECT 1 FROM handoff_barrier WHERE token='${runId}'),'applied',(SELECT remote_lsn >= '${lsn}'::pg_lsn FROM pg_replication_origin_status WHERE external_id='pg_'||(SELECT oid::text FROM pg_subscription WHERE subname='handoff_sub')));`,
-      ),
-    );
-    report.barrier = progress;
-    return progress.barrier && progress.applied;
-  }, "Final source transaction was not applied");
-  gates.barrierApplied = true;
-  report.barrierAppliedAt = Date.now();
-  report.finalSource = JSON.parse(await sql("source", digest));
-  assert.deepEqual(JSON.parse(await sql("target", digest)), report.finalSource);
-  gates.contentsMatched = true;
-  report.finalSourceSequences = JSON.parse(await sql("source", sequences));
-  report.targetSequencesBeforeCorrection = JSON.parse(
-    await sql("target", sequences),
-  );
-  for (const [key, table] of [
-    ["links", "public.links_id_seq"],
-    ["history", "drizzle.__drizzle_migrations_id_seq"],
-  ]) {
-    const sequence = report.finalSourceSequences[key];
-    await sql(
-      "target",
-      `SELECT setval('${table}',${BigInt(sequence.last_value)},${sequence.is_called});`,
-    );
-  }
-  report.targetSequences = JSON.parse(await sql("target", sequences));
-  ensure(
-    Object.values(report.targetSequences).every((s) => !sequenceRepair(s)),
-    "Target sequence allocation is unsafe",
-  );
-  gates.sequencesSafe = true;
-  await sql("target", "ALTER SUBSCRIPTION handoff_sub DISABLE;");
-  await waitFor(
-    async () =>
+    report.invalidatedCandidateSessions = Number(
       (
         await sql(
           "target",
-          "SELECT count(*) FROM pg_stat_subscription WHERE subname='handoff_sub' AND pid IS NOT NULL;",
+          "WITH candidates AS MATERIALIZED (SELECT pid FROM pg_stat_activity WHERE usename='shortlink_app' AND application_name='redirect-service') SELECT count(*) FILTER (WHERE pg_terminate_backend(pid)) FROM candidates;",
         )
-      ).trim() === "0",
-    "Apply worker did not stop",
-  );
-  await sql("target", "DROP SUBSCRIPTION handoff_sub;");
-  ensure(
-    (
+      ).trim(),
+    );
+    ensure(
+      report.invalidatedCandidateSessions >= 2,
+      "The fault did not terminate both runtime candidate sessions",
+    );
+    const failed = await control(
+      { activeDatabase: "ha", prepareDatabase: null },
+      "source",
+      false,
+    );
+    report.checks.failedSwitchRetainedSourceAndClosedWrites = failed;
+    await delay(3000);
+    await kube([
+      "patch",
+      "service",
+      "handoff-target",
+      "--type=merge",
+      "-p",
+      JSON.stringify({ spec: { selector: { app: "handoff-target" } } }),
+    ]);
+    await waitFor(
+      async () =>
+        (
+          await get([
+            "get",
+            "endpointslices",
+            "-l",
+            "kubernetes.io/service-name=handoff-target",
+          ])
+        ).items.some((s) =>
+          (s.endpoints ?? []).some((e) => e.conditions.ready),
+        ),
+      "Target endpoints did not recover",
+    );
+    await control({ activeDatabase: "source", prepareDatabase: "ha" });
+    await control({ creationMode: "accept" });
+    report.failureMaintenanceEndedAt = Date.now();
+    await event("recovered-source-baseline");
+    await delay(5000);
+    await event("real-fixture-handoff");
+    report.handoffMaintenanceStartedAt = Date.now();
+    await control({ creationMode: "reject" });
+    // Demonstrate that an extra client can still write after the API gate has drained.
+    report.outsideGate = (
+      await rogue.query(
+        "INSERT INTO public.links(code,target_url) VALUES($1,$2) RETURNING id::text,code,target_url",
+        ["rogueA01", `https://example.test/rogue/${runId}`],
+      )
+    ).rows[0];
+    assertFixture(await appGet(["get", "namespace", namespace]), runId);
+    report.fenceStartedAt = Date.now();
+    const lsn = (
       await sql(
         "source",
-        "SELECT count(*) FROM pg_replication_slots WHERE slot_name='handoff_sub';",
+        fenceSql(
+          await readFile("deploy/migration/handoff/fence.sql", "utf8"),
+          runId,
+        ),
       )
-    ).trim() === "0",
-    "Fixture slot was not removed",
-  );
-  gates.subscriptionStopped = true;
-  assertSwitchGates(gates);
-  report.gates = gates;
-  await control({ activeDatabase: "ha", prepareDatabase: null });
-  report.poolsSwitchedAt = Date.now();
-  await control({ creationMode: "accept" });
-  report.handoffMaintenanceEndedAt = Date.now();
+    ).trim();
+    assert.match(lsn, /^[A-F0-9]+\/[A-F0-9]+$/);
+    report.fenceLsn = lsn;
+    report.fencedAt = Date.now();
+    try {
+      await rogue.query(
+        "INSERT INTO public.links(code,target_url) VALUES('rogueB01','https://example.test/must-be-denied')",
+      );
+      throw new Error("Old writer still inserted after fencing");
+    } catch (error) {
+      assert.equal(error.code, "42501");
+      report.checks.oldConnectionWriteDenied = error.code;
+    }
+    const oldRead = (
+      await rogue.query(
+        "SELECT pg_backend_pid() AS pid,(SELECT count(*)::int FROM public.links) AS links",
+      )
+    ).rows[0];
+    assert.equal(oldRead.pid, report.oldConnection.pid);
+    report.checks.sameConnectionStillReads = oldRead;
+    report.fencedPrivileges = (
+      await rogue.query(
+        "SELECT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) AS superuser,has_table_privilege(current_user,'public.links','SELECT') AS can_read,has_table_privilege(current_user,'public.links','INSERT') AS can_insert,has_table_privilege(current_user,'public.links','UPDATE') AS can_update,has_table_privilege(current_user,'public.links','DELETE') AS can_delete,has_table_privilege(current_user,'public.links','TRUNCATE') AS can_truncate",
+      )
+    ).rows[0];
+    assert.deepEqual(report.fencedPrivileges, {
+      superuser: false,
+      can_read: true,
+      can_insert: false,
+      can_update: false,
+      can_delete: false,
+      can_truncate: false,
+    });
+    const gates = { fenced: true };
+    await waitFor(async () => {
+      const progress = JSON.parse(
+        await sql(
+          "target",
+          `SELECT json_build_object('barrier',EXISTS(SELECT 1 FROM handoff_barrier WHERE token='${runId}'),'applied',(SELECT remote_lsn >= '${lsn}'::pg_lsn FROM pg_replication_origin_status WHERE external_id='pg_'||(SELECT oid::text FROM pg_subscription WHERE subname='handoff_sub')));`,
+        ),
+      );
+      report.barrier = progress;
+      return progress.barrier && progress.applied;
+    }, "Final source transaction was not applied");
+    gates.barrierApplied = true;
+    report.barrierAppliedAt = Date.now();
+    report.finalSource = JSON.parse(await sql("source", digest));
+    assert.deepEqual(
+      JSON.parse(await sql("target", digest)),
+      report.finalSource,
+    );
+    gates.contentsMatched = true;
+    report.finalSourceSequences = JSON.parse(await sql("source", sequences));
+    report.targetSequencesBeforeCorrection = JSON.parse(
+      await sql("target", sequences),
+    );
+    for (const [key, table] of [
+      ["links", "public.links_id_seq"],
+      ["history", "drizzle.__drizzle_migrations_id_seq"],
+    ]) {
+      const sequence = report.finalSourceSequences[key];
+      await sql(
+        "target",
+        `SELECT setval('${table}',${BigInt(sequence.last_value)},${sequence.is_called});`,
+      );
+    }
+    report.targetSequences = JSON.parse(await sql("target", sequences));
+    ensure(
+      Object.values(report.targetSequences).every((s) => !sequenceRepair(s)),
+      "Target sequence allocation is unsafe",
+    );
+    gates.sequencesSafe = true;
+    await sql("target", "ALTER SUBSCRIPTION handoff_sub DISABLE;");
+    await waitFor(
+      async () =>
+        (
+          await sql(
+            "target",
+            "SELECT count(*) FROM pg_stat_subscription WHERE subname='handoff_sub' AND pid IS NOT NULL;",
+          )
+        ).trim() === "0",
+      "Apply worker did not stop",
+    );
+    await sql("target", "DROP SUBSCRIPTION handoff_sub;");
+    ensure(
+      (
+        await sql(
+          "source",
+          "SELECT count(*) FROM pg_replication_slots WHERE slot_name='handoff_sub';",
+        )
+      ).trim() === "0",
+      "Fixture slot was not removed",
+    );
+    gates.subscriptionStopped = true;
+    assertSwitchGates(gates);
+    report.gates = gates;
+    await control({ activeDatabase: "ha", prepareDatabase: null });
+    report.poolsSwitchedAt = Date.now();
+    await control({ creationMode: "accept" });
+    report.handoffMaintenanceEndedAt = Date.now();
+  }
   await event("destination-serving");
   await waitFor(
     async () => {

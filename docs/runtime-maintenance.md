@@ -9,8 +9,8 @@ passed after staging the node image. No database writer cutover has happened.
 ## Configuration and behavior
 
 In Kubernetes, Fastify reads the named `shortlink-runtime` ConfigMap and watches
-changes through the Kubernetes API. Its namespaced ServiceAccount can get/watch
-that single ConfigMap, with a name field selector on the watch. It cannot change
+changes through the Kubernetes API. Its namespaced ServiceAccount can get/list/watch
+that single ConfigMap, with a name field selector on list and watch. It cannot change
 configuration, list arbitrary ConfigMaps, read Secrets through the API, or manage
 pods. Projected service-account credentials are reread on each connection.
 
@@ -38,7 +38,12 @@ GraphQL queries such as `{ status }` remain available.
 Configured pods start with creation admission closed. A fresh read plus an opened
 watch is needed to enable it. Missing/malformed configuration, API errors,
 expired watch history or a deleted ConfigMap close admission. The watcher retries
-from a fresh GET; normal server watch expiration also refreshes configuration.
+from a fresh named list snapshot; normal server watch expiration also refreshes
+configuration. The watch starts from the collection snapshot's resource version,
+which advances even when this ConfigMap has not changed. Reusing the unchanged
+object's old version could otherwise cause repeated `410 Expired` responses
+after Kubernetes compacts its watch history. The November 16 repair is deployed
+as `0a7dc89`; both replicas remain on source with runtime revision 4.
 An API error never automatically restores `accept` from a local default.
 
 A live connection and matching observed revision are evidence of application,
@@ -49,7 +54,7 @@ retain static local behavior (revision 0, creation enabled). The Kubernetes
 manifest explicitly enables runtime control and supplies `POD_NAMESPACE`.
 
 [Admission state](../apps/redirect-service/src/runtime-maintenance.ts) ·
-[GET/watch transport](../apps/redirect-service/src/maintenance-watch.ts) ·
+[List/watch transport](../apps/redirect-service/src/maintenance-watch.ts) ·
 [Shared creation logic](../apps/redirect-service/src/link-creation.ts).
 
 ## Readiness and internal status

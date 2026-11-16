@@ -204,6 +204,9 @@ remain open before real cutover. See the
 [preparation trial](experiments/ha-target-preparation.md) for its separate
 measured results and remaining boundaries.
 
+See the [guarded live procedure](database-cutover.md) for execution ordering,
+a durable journal, recovery rules and the separate low-traffic scope.
+
 ## Redis and old operations
 
 Positive Redis entries remain usable because existing link destinations are

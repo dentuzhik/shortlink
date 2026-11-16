@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { parseMaintenanceConfig } from "../apps/redirect-service/src/runtime-maintenance.ts";
+import { assertMaintenanceOutsideCutover } from "./lib/cutover.mjs";
 
 process.chdir(fileURLToPath(new URL("../", import.meta.url)));
 const execute = promisify(execFile);
@@ -136,6 +137,34 @@ try {
       JSON.stringify({ desired: current, pods: await statuses() }, null, 2),
     );
   } else {
+    const cutover = (
+      await execute(
+        "kubectl",
+        [
+          ...target,
+          "get",
+          "configmap",
+          "database-cutover",
+          "--ignore-not-found",
+          "-o",
+          "json",
+        ],
+        { timeout: 5000 },
+      )
+    ).stdout.trim();
+    if (cutover) {
+      const object = JSON.parse(cutover);
+      if (object.metadata.labels?.["shortlink.dev/exercise"] !== "live-cutover")
+        throw new Error(
+          "Database cutover control is unmanaged; inspect it before changing runtime configuration",
+        );
+      assertMaintenanceOutsideCutover(
+        JSON.parse(object.data["journal.json"]),
+        current,
+        action,
+        targetDatabase,
+      );
+    }
     if (action === "switch" && current.creationMode !== "reject")
       throw new Error("Begin maintenance before switching pools");
     const creationMode =

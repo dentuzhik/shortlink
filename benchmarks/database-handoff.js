@@ -38,7 +38,9 @@ export const options = {
     handoff_redirect_within_100ms: ["rate>=0.99"],
     handoff_creation_response_valid: ["rate==1"],
     handoff_creations: ["count>=20"],
-    handoff_maintenance_rejections: ["count>=2"],
+    handoff_maintenance_rejections: [
+      __ENV.SUCCESSFUL_COORDINATOR === "true" ? "count>=1" : "count>=2",
+    ],
   },
 };
 export function setup() {

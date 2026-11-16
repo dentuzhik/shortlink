@@ -74,7 +74,10 @@
     "test:db-restore:ha": "pnpm --filter @url-shortener/redirect-service... build && node scripts/rehearse-db-restore.mjs --ha",
     "test:db-handoff": "node scripts/rehearse-handoff.mjs",
     "db:app-roles": "node scripts/prepare-application-roles.mjs",
-    "test:app-role-rollout": "node scripts/test-rolling-restart.mjs --application-roles"
+    "test:app-role-rollout": "node scripts/test-rolling-restart.mjs --application-roles",
+    "db:cutover": "node scripts/live-cutover.mjs",
+    "test:cutover:sql": "node --test scripts/test/cutover-sql.integration.mjs",
+    "test:cutover:success": "node scripts/rehearse-handoff.mjs --coordinator"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

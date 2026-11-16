@@ -210,8 +210,11 @@ Private evidence:
 
 ## Next gates
 
-Dedicated-role preparation and deployment are complete. Before the real writer
-handoff, resolve the failed 1,000/10 operating-load qualification, review a final
-cutover runbook and maintenance-window limit, then perform fresh backup, stream,
-endpoint, capacity and fencing preflight checks. This increment did not authorize
-or perform the live cutover, advance its sequences or stop its subscriber.
+Dedicated-role preparation and deployment are complete. This increment did not
+perform live cutover, advance its sequences or stop its subscriber.
+
+On November 16 the user accepted separating controlled low-traffic cutover from
+the still-unqualified 1,000/10 performance target. The next work is the
+[guarded live procedure and recovery rules](../database-cutover.md), its complete
+disposable rehearsal, explicit stop/recovery limits and fresh backup, stream,
+endpoint, capacity and fencing preflight checks.
