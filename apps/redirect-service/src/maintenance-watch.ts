@@ -105,7 +105,12 @@ export function kubernetesMaintenanceSource(
   }
   return {
     async read(signal) {
-      const response = await request(`${base}/${name}`, signal);
+      // A single-object GET can keep an old object revision forever. LIST with
+      // a name selector supplies a fresh snapshot cursor after watch compaction.
+      const query = new URLSearchParams({
+        fieldSelector: `metadata.name=${name}`,
+      });
+      const response = await request(`${base}?${query}`, signal);
       const chunks: Buffer[] = [];
       let size = 0;
       for await (const chunk of response) {
@@ -116,9 +121,21 @@ export function kubernetesMaintenanceSource(
         }
         chunks.push(chunk);
       }
-      return JSON.parse(
-        Buffer.concat(chunks).toString("utf8"),
-      ) as ConfigMapDocument;
+      const snapshot = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+        metadata?: { resourceVersion?: string };
+        items?: ConfigMapDocument[];
+      };
+      if (snapshot.items?.length !== 1 || !snapshot.metadata?.resourceVersion)
+        throw new Error("Missing named maintenance ConfigMap snapshot");
+      const document = snapshot.items[0];
+      if (!document?.data)
+        throw new Error("Missing maintenance ConfigMap data");
+      // MaintenanceSource.read returns the document data plus the snapshot's
+      // watch cursor. It is never used to write a ConfigMap back to Kubernetes.
+      return {
+        data: document.data,
+        metadata: { resourceVersion: snapshot.metadata.resourceVersion },
+      };
     },
     async *watch(resourceVersion, signal, opened) {
       const query = new URLSearchParams({

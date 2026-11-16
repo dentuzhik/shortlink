@@ -34,13 +34,15 @@ export async function maintenanceApi() {
   let available = false;
   let watchAvailable = true;
   let version = 1;
+  let objectVersion = 1;
+  let lastWatchVersion: string | null = null;
   let config: unknown = { revision: 1, creationMode: "accept" };
   const streams = new Set<ServerResponse>();
   const history: { version: number; document: ReturnType<typeof document> }[] =
     [];
   function document() {
     return {
-      metadata: { resourceVersion: String(version) },
+      metadata: { resourceVersion: String(objectVersion) },
       data: { "control.json": JSON.stringify(config) },
     };
   }
@@ -60,6 +62,7 @@ export async function maintenanceApi() {
       }
       const url = new URL(request.url ?? "/", "https://localhost");
       if (url.searchParams.get("watch") === "true") {
+        lastWatchVersion = url.searchParams.get("resourceVersion");
         if (!watchAvailable) {
           response.writeHead(503).end();
           return;
@@ -83,6 +86,20 @@ export async function maintenanceApi() {
           );
         }
         request.on("close", () => streams.delete(response));
+      } else if (url.pathname.endsWith("/configmaps")) {
+        if (
+          url.searchParams.get("fieldSelector") !==
+          "metadata.name=shortlink-runtime"
+        ) {
+          response.writeHead(403).end();
+          return;
+        }
+        response.writeHead(200, { "Content-Type": "application/json" }).end(
+          JSON.stringify({
+            metadata: { resourceVersion: String(version) },
+            items: [document()],
+          }),
+        );
       } else {
         response
           .writeHead(200, { "Content-Type": "application/json" })
@@ -107,6 +124,7 @@ export async function maintenanceApi() {
     update(value: unknown) {
       config = value;
       version++;
+      objectVersion = version;
       const current = document();
       history.push({ version, document: current });
       for (const stream of streams)
@@ -117,6 +135,12 @@ export async function maintenanceApi() {
     async rotateToken() {
       token = randomUUID();
       await writeFile(`${directory}/token`, token, { mode: 0o600 });
+    },
+    advanceCollection() {
+      version++;
+    },
+    lastWatchVersion() {
+      return lastWatchVersion;
     },
     expireWatches() {
       for (const stream of streams) stream.end();
